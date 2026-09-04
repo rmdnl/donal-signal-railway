@@ -363,4 +363,59 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
+# =====================
+# HELD COINS: semua coin yang di-hold di exchange
+# =====================
+@st.cache_resource
+def _holdings_exchange():
+    if TRADING_MODE not in {"live", "testnet"}:
+        return None
+    api_key = os.getenv("BINANCE_TESTNET_API_KEY" if TRADING_MODE == "testnet" else "BINANCE_LIVE_API_KEY")
+    api_secret = os.getenv("BINANCE_TESTNET_API_SECRET" if TRADING_MODE == "testnet" else "BINANCE_LIVE_API_SECRET")
+    if not api_key or not api_secret:
+        return None
+    try:
+        ex = ccxt.binance({"apiKey": api_key, "secret": api_secret, "enableRateLimit": True, "options": {"defaultType": "spot"}})
+        if TRADING_MODE == "testnet":
+            ex.set_sandbox_mode(True)
+        return ex
+    except Exception:
+        return None
+
+@st.cache_data(ttl=20)
+def fetch_holdings():
+    ex = _holdings_exchange()
+    if ex is None:
+        return []
+    try:
+        bal = ex.fetch_balance()
+        rows = []
+        for code, tot in (bal.get("total") or {}).items():
+            total = float(tot or 0)
+            if total <= 0:
+                continue
+            free = float((bal.get("free") or {}).get(code) or 0)
+            px = 1.0 if code == QUOTE_ASSET else float(prices.get(f"{code}/{QUOTE_ASSET}") or 0)
+            rows.append({"coin": code, "total": total, "free": free, "px": px, "value": total * px})
+        rows.sort(key=lambda r: r["value"], reverse=True)
+        return rows
+    except Exception:
+        return []
+
+_hold_rows = fetch_holdings()
+_hold_total_value = sum(r["value"] for r in _hold_rows)
+st.markdown('<div class="section-title">// HELD COINS · SALDO DI EXCHANGE</div>', unsafe_allow_html=True)
+if _hold_rows:
+    _h = f'<div class="pane"><div class="pane-head"><span>COIN YANG DI-HOLD</span><span>{TRADING_MODE.upper()}</span></div><table class="terminal-table"><thead><tr><th>COIN</th><th>TOTAL</th><th>FREE</th><th>HARGA</th><th>VALUE ({QUOTE_ASSET})</th><th>%</th></tr></thead><tbody>'
+    for r in _hold_rows:
+        pct = (r["value"] / _hold_total_value * 100) if _hold_total_value > 0 else 0
+        _h += f'<tr><td>{r["coin"]}</td><td>{r["total"]:.8f}</td><td>{r["free"]:.8f}</td><td>{r["px"]:,.2f}</td><td>{r["value"]:,.2f}</td><td>{pct:.1f}%</td></tr>'
+    _h += '</tbody></table></div>'
+    st.markdown(_h, unsafe_allow_html=True)
+else:
+    _vp = list(state.get("virtual_positions", {}).keys()) if isinstance(state, dict) else []
+    _note = ", ".join(_vp) if _vp else "gak ada coin yang di-hold / mode signal-only"
+    st.markdown(f'<div class="pane"><div class="pane-head"><span>COIN YANG DI-HOLD</span><span>0</span></div><p style="padding:10px;color:#75817d">{_note}</p></div>', unsafe_allow_html=True)
+
 st.markdown(f'<div class="terminal-footer"><span>DONAL // TRADING TERMINAL · RETRO MODERN v2.1</span><span>{"● BINANCE LINKED" if balance_source=="BINANCE" else "○ "+balance_source} · {time.strftime("%Y-%m-%d")}</span></div>',unsafe_allow_html=True)
