@@ -14,3 +14,9 @@ trade_history.json
 .*
 !.gitignore
 !.env.example
+
+# Strict rule: no history/state/pre_ab files
+*_pre_ab.json
+*_pullback.json
+state_*.json
+history_*.json
