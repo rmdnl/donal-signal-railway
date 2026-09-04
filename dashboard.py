@@ -301,4 +301,66 @@ elif nav=="SYSTEM":
     cfg={"STATE FILE":str(STATE_FILE),"HISTORY FILE":str(HISTORY_FILE),"MODE":mode_label,"QUOTE":QUOTE_ASSET,"REFRESH":"5 SEC","BOT STATE":age_label}
     st.markdown('<div class="pane"><table class="terminal-table">'+''.join(f'<tr><td>{k}</td><td>{v}</td></tr>' for k,v in cfg.items())+'</table></div>',unsafe_allow_html=True)
 
+
+# =====================
+# STRATEGY LAB: BREAKOUT vs PULLBACK (A/B TEST)
+# =====================
+PULLBACK_HISTORY = Path(os.getenv("PULLBACK_HISTORY_FILE", "/home/ubuntu/donal-pullback/history_pullback.json"))
+PULLBACK_STATE = Path(os.getenv("PULLBACK_STATE_FILE", "/home/ubuntu/donal-pullback/state_pullback.json"))
+
+def strategy_stats(hist):
+    if not hist:
+        return None
+    pnls = [float(t.get("pnl_net", t.get("pnl", 0)) or 0) for t in hist]
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p <= 0]
+    gross_win = sum(wins)
+    gross_loss = abs(sum(losses))
+    pf = (gross_win / gross_loss) if gross_loss > 0 else (float("inf") if gross_win > 0 else 0.0)
+    eq = 0.0; peak = 0.0; mdd = 0.0
+    for p in pnls:
+        eq += p
+        peak = max(peak, eq)
+        mdd = min(mdd, eq - peak)
+    return {"trades": len(pnls), "wins": len(wins), "win_rate": (len(wins)/len(pnls)*100) if pnls else 0.0, "net": sum(pnls), "pf": pf, "mdd": mdd}
+
+pb_history = load_json(PULLBACK_HISTORY, [])
+if not isinstance(pb_history, list):
+    pb_history = []
+pb_state = load_json(PULLBACK_STATE, {})
+pb_positions = pb_state.get("virtual_positions", {}) if isinstance(pb_state, dict) else {}
+
+st_a = strategy_stats(history)
+st_b = strategy_stats(pb_history)
+
+def _fmt_pf(v):
+    return "inf" if v == float("inf") else f"{v:.2f}"
+
+a_tr = st_a["trades"] if st_a else 0
+b_tr = st_b["trades"] if st_b else 0
+a_wr = st_a["win_rate"] if st_a else 0.0
+b_wr = st_b["win_rate"] if st_b else 0.0
+a_net = st_a["net"] if st_a else 0.0
+b_net = st_b["net"] if st_b else 0.0
+a_pf = _fmt_pf(st_a["pf"] if st_a else 0.0)
+b_pf = _fmt_pf(st_b["pf"] if st_b else 0.0)
+a_mdd = st_a["mdd"] if st_a else 0.0
+b_mdd = st_b["mdd"] if st_b else 0.0
+a_cls = "pos" if a_net >= 0 else "neg"
+b_cls = "pos" if b_net >= 0 else "neg"
+
+st.markdown('<div class="section-title">// STRATEGY LAB · A/B TEST</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="pane"><div class="pane-head"><span>BREAKOUT vs PULLBACK · TESTNET RACE</span><span>LIVE</span></div>'
+    '<table class="terminal-table"><thead><tr><th>METRIC</th><th>BREAKOUT</th><th>PULLBACK</th></tr></thead><tbody>'
+    f'<tr><td>OPEN POSITIONS</td><td>{len(open_rows)}</td><td>{len(pb_positions)}</td></tr>'
+    f'<tr><td>CLOSED TRADES</td><td>{a_tr}</td><td>{b_tr}</td></tr>'
+    f'<tr><td>WIN RATE</td><td>{a_wr:.1f}%</td><td>{b_wr:.1f}%</td></tr>'
+    f'<tr><td>NET PNL</td><td class="{a_cls}">{a_net:+,.2f}</td><td class="{b_cls}">{b_net:+,.2f}</td></tr>'
+    f'<tr><td>PROFIT FACTOR</td><td>{a_pf}</td><td>{b_pf}</td></tr>'
+    f'<tr><td>MAX DRAWDOWN</td><td class="neg">{a_mdd:,.2f}</td><td class="neg">{b_mdd:,.2f}</td></tr>'
+    '</tbody></table></div>',
+    unsafe_allow_html=True,
+)
+
 st.markdown(f'<div class="terminal-footer"><span>DONAL // TRADING TERMINAL · RETRO MODERN v2.1</span><span>{"● BINANCE LINKED" if balance_source=="BINANCE" else "○ "+balance_source} · {time.strftime("%Y-%m-%d")}</span></div>',unsafe_allow_html=True)
