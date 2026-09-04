@@ -329,17 +329,27 @@ def fetch_holdings():
         return []
     try:
         bal = ex.fetch_balance()
-        rows = []
-        for code, tot in (bal.get("total") or {}).items():
-            total = float(tot or 0)
-            if total <= 0:
+        totals = bal.get("total") or {}
+        frees = bal.get("free") or {}
+        codes = [c for c in totals if float(totals.get(c) or 0) > 0]
+        px_map = {}
+        for code in codes:
+            if code == QUOTE_ASSET:
+                px_map[code] = 1.0
                 continue
-            px = 1.0 if code == QUOTE_ASSET else float(prices.get(f"{code}/{QUOTE_ASSET}") or 0)
+            try:
+                px_map[code] = float(ex.fetch_ticker(f"{code}/{QUOTE_ASSET}").get("last") or 0)
+            except Exception:
+                px_map[code] = 0.0
+        rows = []
+        for code in codes:
+            total = float(totals.get(code) or 0)
+            free = float(frees.get(code) or 0)
+            px = px_map.get(code, 0.0)
             value = total * px
             # Filter dust: sembunyikan koin yang value-nya di bawah $1 (kecuali USDT)
             if value < 1.0 and code != QUOTE_ASSET:
                 continue
-            free = float((bal.get("free") or {}).get(code) or 0)
             rows.append({"coin": code, "total": total, "free": free, "px": px, "value": value})
         rows.sort(key=lambda r: r["value"], reverse=True)
         return rows
