@@ -1,0 +1,7 @@
+ccxt==4.5.77
+pandas==2.2.2
+numpy==1.26.4
+python-dotenv==1.0.1
+plotly==6.3.0
+streamlit==1.63.0
+streamlit-autorefresh==1.0.1

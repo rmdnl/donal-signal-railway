@@ -1,0 +1,16 @@
+.env
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.bak*
+*.backup*
+*.before-*
+*.tmp
+*.log
+state_signals*
+trade_history.json
+.DS_Store
+.*
+!.gitignore
+!.env.example
