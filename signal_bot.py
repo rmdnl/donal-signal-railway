@@ -931,7 +931,7 @@ def _is_definitive_not_found(exc):
     text = str(exc).lower()
     info = getattr(exc, "args", None)
     blob = f"{text} {info}".lower()
-    return any(code in blob for code in ("-2011", "-2013", "unknown order sent", "order does not exist", "order not found"))
+    return any(code in blob for code in ("-2011", "-2013", "-2018", "unknown order sent", "order does not exist", "order list does not exist", "order not found"))
 
 
 def lookup_order_by_client_id(symbol, client_order_id):
@@ -985,7 +985,7 @@ def lookup_oco_by_client_id(symbol, list_client_order_id):
     """Return (FOUND|NOT_FOUND|UNKNOWN, order-list response)."""
     if not list_client_order_id:
         return "NOT_FOUND", None
-    params = {"symbol": _binance_symbol(symbol), "origClientOrderId": list_client_order_id}
+    params = {"origClientOrderId": list_client_order_id}  # FIX: endpoint orderList gak terima param symbol (-1104)
     saw_unknown = False
     direct_available = False
     for name in ("private_get_order_list", "privateGetOrderList"):
