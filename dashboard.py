@@ -395,9 +395,13 @@ def fetch_holdings():
             total = float(tot or 0)
             if total <= 0:
                 continue
-            free = float((bal.get("free") or {}).get(code) or 0)
             px = 1.0 if code == QUOTE_ASSET else float(prices.get(f"{code}/{QUOTE_ASSET}") or 0)
-            rows.append({"coin": code, "total": total, "free": free, "px": px, "value": total * px})
+            value = total * px
+            # Filter dust: sembunyikan koin yang value-nya di bawah $1 (kecuali USDT)
+            if value < 1.0 and code != QUOTE_ASSET:
+                continue
+            free = float((bal.get("free") or {}).get(code) or 0)
+            rows.append({"coin": code, "total": total, "free": free, "px": px, "value": value})
         rows.sort(key=lambda r: r["value"], reverse=True)
         return rows
     except Exception:
