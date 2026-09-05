@@ -74,11 +74,6 @@ ADX_LENGTH = env_int("ADX_LENGTH", 14)
 ADX_THRESHOLD = env_float("ADX_THRESHOLD", 20.0)
 
 # --- Strategy variant ---
-STRATEGY_MODE = os.getenv("STRATEGY_MODE", "breakout").strip().lower()  # breakout | pullback
-STOCH_RSI_LENGTH = env_int("STOCH_RSI_LENGTH", 14)
-STOCH_RSI_OS = env_float("STOCH_RSI_OS", 20.0)
-PULLBACK_EMA_FAST = env_int("PULLBACK_EMA_FAST", 13)
-PULLBACK_EMA_SLOW = env_int("PULLBACK_EMA_SLOW", 34)
 VOLUME_MA_LENGTH = env_int("VOLUME_MA_LENGTH", 20)
 VOLUME_MULT = env_float("VOLUME_MULT", 1.0)
 
@@ -150,6 +145,7 @@ RISK_OVERSHOOT_ACTION = os.getenv("RISK_OVERSHOOT_ACTION", "reduce").strip().low
 # bot otomatis fallback ke polling-based SL/TP (mekanisme lama) supaya posisi
 # tidak pernah dibiarkan tanpa proteksi sama sekali.
 USE_NATIVE_OCO_SLTP = env_bool("USE_NATIVE_OCO_SLTP", True)
+OCO_REPRICE_BUFFER_PCT = env_float("OCO_REPRICE_BUFFER_PCT", 0.15)
 
 # --- Break-Even (BE) Protection ---
 USE_BREAK_EVEN = env_bool("USE_BREAK_EVEN", True)
@@ -576,17 +572,7 @@ def rsi(close, length):
     with np.errstate(divide="ignore", invalid="ignore"):
         rs = avg_gain / avg_loss
         out = 100 - (100 / (1 + rs))
-    return out.fillna(50.0)
-
-def stochastic_rsi(close, length=14, k_smooth=3, d_smooth=3):
-    rsi_vals = rsi(close, length)
-    lo = rsi_vals.rolling(length).min()
-    hi = rsi_vals.rolling(length).max()
-    stoch = 100 * (rsi_vals - lo) / (hi - lo).replace(0, np.nan)
-    k = stoch.rolling(k_smooth).mean()
-    d = k.rolling(d_smooth).mean()
-    return k, d
-
+    return out
 
 def atr(df, length):
     high = df["high"]
@@ -626,7 +612,7 @@ def adx(df, length=14):
     dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
     adx_val = rma(dx, length)
     
-    return adx_val.fillna(0.0)
+    return adx_val
 
 def find_last_pivots(df, left, right):
     highs = df["high"].values
@@ -698,18 +684,13 @@ def get_htf_bull_trend(symbol):
     df4h = fetch_closed_ohlcv(symbol, HTF_TIMEFRAME, 100)
     df4h["ema20"] = ema(df4h["close"], 20)
     df4h["ema60"] = ema(df4h["close"], 60)
-    df4h["ema13"] = ema(df4h["close"], PULLBACK_EMA_FAST)
-    df4h["ema34"] = ema(df4h["close"], PULLBACK_EMA_SLOW)
     df4h["rsi14"] = rsi(df4h["close"], RSI_LENGTH)
     htf = df4h.iloc[-1]
 
-    if pd.isna(htf["ema20"]) or pd.isna(htf["ema60"]) or pd.isna(htf["ema13"]) or pd.isna(htf["ema34"]) or pd.isna(htf["rsi14"]):
+    if pd.isna(htf["ema20"]) or pd.isna(htf["ema60"]) or pd.isna(htf["rsi14"]):
         return None
 
-    if STRATEGY_MODE == "pullback":
-        bull_trend = bool(htf["ema13"] > htf["ema34"] and htf["rsi14"] > 50)
-    else:
-        bull_trend = bool(htf["ema20"] > htf["ema60"] and htf["rsi14"] > 50)
+    bull_trend = bool(htf["ema20"] > htf["ema60"] and htf["rsi14"] > 50)
     bar_ts = int(htf["ts"])
     # Valid until the NEXT HTF candle closes (current bar closes at bar_ts+tf_ms,
     # the one after that at bar_ts+2*tf_ms -- that's when a fresher value exists).
@@ -748,11 +729,6 @@ def calculate_signal(symbol):
         df1h["adx"] = adx(df1h, ADX_LENGTH)
     df1h["volume_ma"] = df1h["volume"].rolling(VOLUME_MA_LENGTH).mean()
     df1h["atr_ma"] = df1h["atr14"].rolling(ATR_MA_LENGTH).mean()
-    if STRATEGY_MODE == "pullback":
-        stoch_k, stoch_d = stochastic_rsi(df1h["close"], STOCH_RSI_LENGTH)
-        df1h["stoch_k"] = stoch_k
-        df1h["stoch_d"] = stoch_d
-
     bull_trend = get_htf_bull_trend(symbol)
     if bull_trend is None:
         log.info(f"{symbol}: data HTF belum cukup.")
@@ -773,9 +749,6 @@ def calculate_signal(symbol):
         required.append(row["adx"])
     if USE_VOL_SCALED_SLTP:
         required.append(row["atr_ma"])
-    if STRATEGY_MODE == "pullback":
-        required.append(row["stoch_k"])
-        required.append(row["stoch_d"])
     if any(pd.isna(x) for x in required):
         log.info(f"{symbol}: indikator masih NaN.")
         return None
@@ -785,25 +758,14 @@ def calculate_signal(symbol):
 
     last_pivot_high, last_pivot_low = find_last_pivots(df1h, SR_LEFT_BARS, SR_RIGHT_BARS)
 
-    if STRATEGY_MODE == "pullback":
-        # Pullback: StochRSI cross-up keluar dari oversold = trigger
-        prev_k = float(df1h["stoch_k"].iloc[-2])
-        prev_d = float(df1h["stoch_d"].iloc[-2])
-        cross_up = bool(prev_k <= prev_d and float(row["stoch_k"]) > float(row["stoch_d"]))
-        was_oversold = bool(prev_k < STOCH_RSI_OS)
-        recent_low = float(df1h["low"].iloc[-10:].min())
-        higher_low_ok = (last_pivot_low is None) or (recent_low >= last_pivot_low * 0.995)
-        pb_vol_ok = (not USE_VOLUME_FILTER) or bool(float(row["volume"]) > float(df1h["volume"].iloc[-2]))
-        buy_trigger = bool(cross_up and was_oversold)
-    else:
-        # breakoutTrigger di Pine: close > ema20 AND rsi14 > rsiEntryLv AND close > hhN
-        higher_low_ok = True
-        pb_vol_ok = True
-        buy_trigger = bool(
-            close > row["ema20"]
-            and row["rsi14"] > RSI_ENTRY
-            and close > row["hh20_prev"]
-        )
+    # breakoutTrigger di Pine: close > ema20 AND rsi14 > rsiEntryLv AND close > hhN
+    higher_low_ok = True
+    pb_vol_ok = True
+    buy_trigger = bool(
+    close > row["ema20"]
+    and row["rsi14"] > RSI_ENTRY
+    and close > row["hh20_prev"]
+    )
 
     room_to_resistance = None
     if last_pivot_high is not None and last_pivot_high > close:
@@ -840,15 +802,7 @@ def calculate_signal(symbol):
             sl_mult = SL_MULT * vol_scale
             tp_mult = TP_MULT * vol_scale
 
-    if STRATEGY_MODE == "pullback":
-        # [PATCH AUDIT] res_room_ok ditambahkan supaya entry pullback juga tidak
-        # mepet ke resistance terdekat, konsisten dengan mode breakout.
-        buy_signal = bool(
-            bull_trend and buy_trigger and higher_low_ok and pb_vol_ok
-            and res_room_ok and session_ok and adx_ok
-        )
-    else:
-        buy_signal = bool(bull_trend and buy_trigger and res_room_ok and volume_ok and session_ok and adx_ok)
+    buy_signal = bool(bull_trend and buy_trigger and res_room_ok and volume_ok and session_ok and adx_ok)
 
     exit_trend = bool(close < row["ema20"] or row["rsi14"] < RSI_EXIT)
 
@@ -1140,6 +1094,26 @@ def get_total_equity(state, quote_asset=None):
         open_value += qty * price
     return quote_bal + open_value
 
+
+
+def get_total_equity_quote(state):
+    """Ekuitas riil = cash USDT + nilai pasar semua posisi terbuka di state."""
+    cash = get_equity(QUOTE_ASSET)
+    positions = state.get("virtual_positions", {}) if isinstance(state, dict) else {}
+    value = 0.0
+    for sym, pos in positions.items():
+        qty = float(pos.get("filled_qty") or pos.get("qty") or 0.0)
+        if qty <= 0:
+            continue
+        px = None
+        try:
+            px = get_ticker_price(sym)
+        except Exception:
+            px = None
+        if not px:
+            px = float(pos.get("entry", 0.0) or 0.0)
+        value += qty * float(px)
+    return cash + value
 
 def compute_sl_tp(signal_data, entry):
     """
@@ -1641,6 +1615,21 @@ def mark_protection_unknown(state, symbol, reason):
     save_state(state)
     notify_error(f"{symbol}: PROTECTION UNKNOWN: {reason}. Tidak ada blind retry/duplicate SELL.")
 
+
+
+def reprice_tp_if_crossed(symbol, tp, sl):
+    """Re-price sekali kalau TP ter-crossed karena harga pump cepat setelah fill."""
+    bid, ask = get_best_bid_ask(symbol)
+    if bid <= 0 or ask <= 0:
+        raise OcoPreflightError("book kosong, re-price tidak mungkin")
+    if sl >= bid:
+        raise OcoPreflightError(f"SL {sl} ter-crossed terhadap bid {bid}; flatten lebih disiplin")
+    if tp > ask:
+        return tp, sl
+    new_tp = ask * (1 + OCO_REPRICE_BUFFER_PCT / 100.0)
+    if new_tp <= ask or new_tp <= sl:
+        raise OcoPreflightError("hasil re-price TP tidak valid")
+    return new_tp, sl
 
 def try_place_native_protection(state, symbol):
     """
@@ -2476,7 +2465,8 @@ def reconcile_pending_orders(state):
             log.warning(f"{symbol}: pending BUY intent {client_id} lookup UNKNOWN; recovery ditahan.")
             continue
         if not order:
-            log.warning(f"{symbol}: pending BUY intent {client_id} belum ditemukan; tidak membuat duplicate BUY.")
+            log.warning(f"{symbol}: pending BUY intent {client_id} tidak ditemukan di exchange; dihapus dari state.")
+            state.setdefault("entry_intents", {}).pop(symbol, None)
             continue
         signal_data = intent.get("signal_data") or {}
         reference_price = float(intent.get("reference_price") or signal_data.get("close") or 0.0)
@@ -2490,6 +2480,9 @@ def reconcile_pending_orders(state):
     for symbol in list(state.get("oco_intents", {})):
         if symbol in state.get("virtual_positions", {}):
             try_place_native_protection(state, symbol)
+        else:
+            state.setdefault("oco_intents", {}).pop(symbol, None)
+            log.info(f"{symbol}: orphaned OCO intent dibersihkan (posisi sudah tidak ada).")
 
     for symbol, intent in list(state.get("exit_intents", {}).items()):
         client_id = intent.get("client_order_id")
@@ -2498,7 +2491,8 @@ def reconcile_pending_orders(state):
             log.warning(f"{symbol}: pending SELL intent {client_id} lookup UNKNOWN; recovery ditahan.")
             continue
         if not order:
-            log.warning(f"{symbol}: pending SELL intent {client_id} belum ditemukan; tidak membuat duplicate SELL.")
+            log.warning(f"{symbol}: pending SELL intent {client_id} tidak ditemukan di exchange; dihapus dari state.")
+            state.setdefault("exit_intents", {}).pop(symbol, None)
             continue
         pos = state.get("virtual_positions", {}).get(symbol)
         if pos:
@@ -2731,7 +2725,6 @@ def run():
     startup_lines = [
         f"🤖 DONAL Signal Bot started",
         mode_line,
-        f"Strategy variant: {STRATEGY_MODE.upper()}",
         f"Symbols: {', '.join(VALID_SYMBOLS)}",
         f"TF: {TIMEFRAME}",
         f"HTF: {HTF_TIMEFRAME}",
