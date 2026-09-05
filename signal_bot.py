@@ -576,7 +576,7 @@ def rsi(close, length):
     with np.errstate(divide="ignore", invalid="ignore"):
         rs = avg_gain / avg_loss
         out = 100 - (100 / (1 + rs))
-    return out.fillna(50.0)
+    return out
 
 def stochastic_rsi(close, length=14, k_smooth=3, d_smooth=3):
     rsi_vals = rsi(close, length)
@@ -626,7 +626,7 @@ def adx(df, length=14):
     dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
     adx_val = rma(dx, length)
     
-    return adx_val.fillna(0.0)
+    return adx_val
 
 def find_last_pivots(df, left, right):
     highs = df["high"].values
