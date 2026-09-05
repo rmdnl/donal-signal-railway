@@ -659,8 +659,6 @@ def get_htf_bull_trend(symbol):
     df4h = fetch_closed_ohlcv(symbol, HTF_TIMEFRAME, 100)
     df4h["ema20"] = ema(df4h["close"], 20)
     df4h["ema60"] = ema(df4h["close"], 60)
-    df4h["ema13"] = ema(df4h["close"], PULLBACK_EMA_FAST)
-    df4h["ema34"] = ema(df4h["close"], PULLBACK_EMA_SLOW)
     df4h["rsi14"] = rsi(df4h["close"], RSI_LENGTH)
     htf = df4h.iloc[-1]
 
