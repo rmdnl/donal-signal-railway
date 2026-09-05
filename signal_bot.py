@@ -1098,7 +1098,28 @@ def get_total_equity(state, quote_asset=None):
 
 def get_total_equity_quote(state):
     """Ekuitas riil = cash USDT + nilai pasar semua posisi terbuka di state."""
-    cash = get_equity(QUOTE_ASSET)
+    # Pakai exchange global kalau tersedia, fallback ke make_exchange()
+    ex = exchange
+    if ex is None:
+        try:
+            ex = make_exchange()
+        except Exception:
+            return 0.0
+    
+    # Fetch cash
+    try:
+        balance = ex.fetch_balance()
+        total = None
+        if QUOTE_ASSET in balance and isinstance(balance[QUOTE_ASSET], dict):
+            total = balance[QUOTE_ASSET].get("total")
+        if total is None:
+            total = (balance.get("total") or {}).get(QUOTE_ASSET)
+        cash = float(total or 0.0)
+    except Exception as e:
+        log.warning(f"Gagal fetch total balance {QUOTE_ASSET}: {e}")
+        cash = 0.0
+    
+    # Hitung nilai posisi
     positions = state.get("virtual_positions", {}) if isinstance(state, dict) else {}
     value = 0.0
     for sym, pos in positions.items():
@@ -1107,7 +1128,8 @@ def get_total_equity_quote(state):
             continue
         px = None
         try:
-            px = get_ticker_price(sym)
+            t = ex.fetch_ticker(sym)
+            px = float(t.get("last") or t.get("bid") or t.get("ask") or 0)
         except Exception:
             px = None
         if not px:
