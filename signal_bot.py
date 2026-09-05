@@ -1387,19 +1387,17 @@ def place_entry_order(state, symbol, signal_data, market_price):
     }
     intents.pop(symbol, None)
 
-    notify_event(
+    risk_line = f"Risk aktual: {fmt(actual_risk_quote)} {QUOTE_ASSET}"
+    if actual_risk_pct is not None:
+        risk_line += f" ({actual_risk_pct:+.3f}% equity)"
+    msg = (
         f"🟢 ENTRY FILLED {symbol} [{TRADING_MODE.upper()}] (MARKET)\n"
         f"Harga fill: {fmt(avg_price)} (referensi: {fmt(market_price)})\n"
         f"Slippage entry: {realized_slippage_pct:+.3f}%\n"
         f"Qty: {fmt(filled_qty)}\n"
-        f"Risk aktual: {fmt(actual_risk_quote)} {QUOTE_ASSET}"
-        f" ({actual_risk_pct:+.3f}% equity)\n" if actual_risk_pct is not None else
-        f"🟢 ENTRY FILLED {symbol} [{TRADING_MODE.upper()}] (MARKET)\n"
-        f"Harga fill: {fmt(avg_price)} (referensi: {fmt(market_price)})\n"
-        f"Slippage entry: {realized_slippage_pct:+.3f}%\n"
-        f"Qty: {fmt(filled_qty)}\n"
-        f"Risk aktual: {fmt(actual_risk_quote)} {QUOTE_ASSET}\n"
+        f"{risk_line}\n"
     )
+    notify_event(msg)
 
     save_state(state)
     try_place_native_protection(state, symbol)
