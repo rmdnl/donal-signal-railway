@@ -86,7 +86,9 @@ Bot nunggu:
 - Jarak ke resistance masih lega
 
 Semua iya? **Let him cook.** 👨‍🍳🔥
-Ada yang enggak? **Skip.** Bot gak kenal kata "tanggung".
+
+Ada yang enggak? **Skip.** 
+Bot gak kenal kata "tanggung".
 
 ### 3. Exit — Gak Pake Perasaan 🚪
 - **TP HIT**: cuan, ambil. Jangan serakah.
