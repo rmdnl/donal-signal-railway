@@ -1090,6 +1090,25 @@ def get_equity(quote_asset=None):
         return 0.0
 
 
+def get_total_equity_quote(state):
+    """Ekuitas riil = cash USDT + nilai pasar semua posisi terbuka di state."""
+    cash = get_equity(QUOTE_ASSET)
+    positions = state.get("virtual_positions", {}) if isinstance(state, dict) else {}
+    value = 0.0
+    for sym, pos in positions.items():
+        qty = float(pos.get("filled_qty") or pos.get("qty") or 0.0)
+        if qty <= 0:
+            continue
+        px = None
+        try:
+            px = get_ticker_price(sym)
+        except Exception:
+            px = None
+        if not px:
+            px = float(pos.get("entry", 0.0) or 0.0)
+        value += qty * float(px)
+    return cash + value
+
 def compute_sl_tp(signal_data, entry):
     """
     Shared SL/TP calc dipakai baik oleh alert signal-only maupun order auto-trading,
