@@ -1350,6 +1350,20 @@ def place_entry_order(state, symbol, signal_data, market_price):
     avg_price = float(order.get("average") or order.get("price") or 0.0)
     filled_qty = float(order.get("filled") or 0.0)
     order_id = order.get("id")
+    
+    # [FEE FIX] Fetch saldo real setelah entry buat handle fee deduction
+    # Binance potong fee dari filled_qty, jadi saldo free < executedQty
+    try:
+        import time as _t
+        _t.sleep(1)  # Kasih waktu exchange update saldo
+        bal_after = exchange.fetch_balance()
+        base_asset = symbol.split("/")[0]
+        real_free = float((bal_after.get("free") or {}).get(base_asset) or 0.0)
+        if real_free > 0 and real_free < filled_qty:
+            log.info(f"{symbol}: filled_qty adjusted {filled_qty} -> {real_free} (after fee)")
+            filled_qty = real_free
+    except Exception as e:
+        log.warning(f"{symbol}: gagal fetch saldo post-entry: {e}")
 
     if avg_price <= 0 or filled_qty <= 0:
         try:
