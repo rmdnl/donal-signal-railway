@@ -36,7 +36,7 @@ Kalau lu aktifin, bot bakal:
 
 Semua pake market order. Karena limit order itu kayak nunggu doi bales chat — kadang gak pernah. 💀
 
-### 🛡️ Risk Management Lebih Ketat dari Ortu Lu
+### 🛡️ Risk Management Lebih strict dari your parents 
 
 - Max posisi terbuka (jangan rakus, bro)
 - Guard korelasi (BTC/ETH/SOL satu geng, gak dibeli bareng)
@@ -50,7 +50,7 @@ Tapi setidaknya lu rugi **terencana**. 🗿
 
 ### 🚨 Anti Fakeout Detector
 - **Resistance room**: mepet atap? Skip. Gak mau nyangkut di pucuk terus jadi konten ratapan.
-- **Volume filter**: breakout tanpa volume itu kayak chat "pagi" dari doi — keliatannya ada, tapi kosong.
+- **Volume filter**: breakout tanpa volume itu kayak postingan flexing temen lu di IG — keliatannya ada, tapi kosong.
 - **ADX filter**: cek kekuatan tren (ADX > 20). Market lemes? Skip.
 - **ATR scaling**: SL/TP ngikutin volatilitas, gak asal tempel.
 
@@ -64,7 +64,7 @@ Tapi setidaknya lu rugi **terencana**. 🗿
 
 ### 📱 Telegram Bestie
 Notif cepet. Fast response. Gak ghosting.
-Pokoknya semua yang gak bisa dilakuin doi lu. 😭
+Pokoknya semua yang gak bisa dilakuin your crush. 😭
 
 ---
 
@@ -113,7 +113,7 @@ nano .env
 python3 signal_bot.py
 ~~~
 
-Kalau muncul `🤖 DONAL Signal Bot started`, berarti bot hidup. W. 🎉
+Kalau muncul `🤖 DONAL Signal Robot started`, berarti bot hidup. W. 🎉
 
 ---
 
