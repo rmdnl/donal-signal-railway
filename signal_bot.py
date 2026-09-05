@@ -662,7 +662,7 @@ def get_htf_bull_trend(symbol):
     df4h["rsi14"] = rsi(df4h["close"], RSI_LENGTH)
     htf = df4h.iloc[-1]
 
-    if pd.isna(htf["ema20"]) or pd.isna(htf["ema60"]) or pd.isna(htf["ema13"]) or pd.isna(htf["ema34"]) or pd.isna(htf["rsi14"]):
+    if pd.isna(htf["ema20"]) or pd.isna(htf["ema60"]) or pd.isna(htf["rsi14"]):
         return None
 
     bull_trend = bool(htf["ema20"] > htf["ema60"] and htf["rsi14"] > 50)
