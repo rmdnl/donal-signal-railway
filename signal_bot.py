@@ -181,6 +181,11 @@ logging.basicConfig(
 )
 log = logging.getLogger("donal-signal-railway")
 
+# [TESTNET FIX] Binance Testnet gak support native OCO, fallback ke polling SL/TP
+if TRADING_MODE == "testnet" and USE_NATIVE_OCO_SLTP:
+    log.warning("⚠️ TESTNET MODE: Native OCO tidak didukung di Binance Testnet. Fallback ke polling SL/TP.")
+    USE_NATIVE_OCO_SLTP = False
+
 RUNNING = True
 _telegram_warned = False
 # [PATCH AUDIT] notify_throttled() dan state pendukungnya (_notify_last_time,
