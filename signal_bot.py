@@ -2402,7 +2402,8 @@ def reconcile_pending_orders(state):
             log.warning(f"{symbol}: pending BUY intent {client_id} lookup UNKNOWN; recovery ditahan.")
             continue
         if not order:
-            log.warning(f"{symbol}: pending BUY intent {client_id} belum ditemukan; tidak membuat duplicate BUY.")
+            log.warning(f"{symbol}: pending BUY intent {client_id} tidak ditemukan di exchange; dihapus dari state.")
+            state.setdefault("entry_intents", {}).pop(symbol, None)
             continue
         signal_data = intent.get("signal_data") or {}
         reference_price = float(intent.get("reference_price") or signal_data.get("close") or 0.0)
@@ -2416,6 +2417,9 @@ def reconcile_pending_orders(state):
     for symbol in list(state.get("oco_intents", {})):
         if symbol in state.get("virtual_positions", {}):
             try_place_native_protection(state, symbol)
+        else:
+            state.setdefault("oco_intents", {}).pop(symbol, None)
+            log.info(f"{symbol}: orphaned OCO intent dibersihkan (posisi sudah tidak ada).")
 
     for symbol, intent in list(state.get("exit_intents", {}).items()):
         client_id = intent.get("client_order_id")
@@ -2424,7 +2428,8 @@ def reconcile_pending_orders(state):
             log.warning(f"{symbol}: pending SELL intent {client_id} lookup UNKNOWN; recovery ditahan.")
             continue
         if not order:
-            log.warning(f"{symbol}: pending SELL intent {client_id} belum ditemukan; tidak membuat duplicate SELL.")
+            log.warning(f"{symbol}: pending SELL intent {client_id} tidak ditemukan di exchange; dihapus dari state.")
+            state.setdefault("exit_intents", {}).pop(symbol, None)
             continue
         pos = state.get("virtual_positions", {}).get(symbol)
         if pos:
