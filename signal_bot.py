@@ -1122,7 +1122,7 @@ def compute_sl_tp(signal_data, entry):
     return sl, tp, sltp_note
 
 
-def calculate_position_size(symbol, entry_price, sl_price):
+def calculate_position_size(state, symbol, entry_price, sl_price):
     """
     Risk-based sizing: qty = (equity_quote * RISK_PCT_PER_TRADE%) / (entry - SL).
     Dibatasi presisi & minimum order exchange. Return None kalau tidak valid/tidak cukup.
@@ -1131,7 +1131,7 @@ def calculate_position_size(symbol, entry_price, sl_price):
         log.warning(f"{symbol}: entry/SL tidak valid untuk sizing (entry={entry_price}, sl={sl_price}).")
         return None
 
-    equity = get_equity(QUOTE_ASSET)
+    equity = get_total_equity_quote(state)
     available_quote = get_available_quote(QUOTE_ASSET)
     if equity <= 0 or available_quote <= 0:
         log.warning(f"{symbol}: saldo {QUOTE_ASSET} 0 atau gagal diambil, skip sizing.")
@@ -1204,7 +1204,7 @@ def place_entry_order(state, symbol, signal_data, market_price):
     if existing_intent_pre and existing_intent_pre.get("qty_requested"):
         qty = float(existing_intent_pre["qty_requested"])
     else:
-        qty = calculate_position_size(symbol, ask, sl_ref)
+        qty = calculate_position_size(state, symbol, ask, sl_ref)
         if qty is None or qty <= 0:
             notify_error(f"{symbol}: gagal hitung position size (saldo/minimum order), BUY dibatalkan.")
             return
@@ -1249,7 +1249,7 @@ def place_entry_order(state, symbol, signal_data, market_price):
             # same deterministic client ID may be submitted again exactly once.
             order = None
     else:
-        equity_for_plan = get_equity(QUOTE_ASSET)
+        equity_for_plan = get_total_equity_quote(state)
         planned_risk_quote = max(ask - sl_ref, 0.0) * qty
         intents[symbol] = {
             "client_order_id": client_id,
@@ -1353,7 +1353,7 @@ def place_entry_order(state, symbol, signal_data, market_price):
     realized_slippage_pct = (avg_price - market_price) / market_price * 100.0
     risk_per_unit = max(avg_price - sl, 0.0)
     actual_risk_quote = risk_per_unit * filled_qty
-    actual_equity = get_equity(QUOTE_ASSET) + (avg_price * filled_qty)
+    actual_equity = get_total_equity_quote(state) + (avg_price * filled_qty)
     actual_risk_pct = (actual_risk_quote / actual_equity * 100.0) if actual_equity > 0 else None
 
     # Enforce a post-fill risk ceiling. A market fill can move far enough from the
@@ -1412,7 +1412,7 @@ def place_entry_order(state, symbol, signal_data, market_price):
                     trigger_exit(state, symbol, "RISK LIMIT EXIT", get_ticker_price(symbol))
                 else:
                     risk_per_unit = max(float(pos_after.get("entry", 0.0)) - float(pos_after.get("sl", 0.0)), 0.0)
-                    equity_now = get_equity(QUOTE_ASSET) + float(pos_after.get("entry", 0.0)) * float(pos_after.get("filled_qty", 0.0))
+                    equity_now = get_total_equity_quote(state)
                     max_risk_quote = equity_now * MAX_ACTUAL_RISK_PCT / 100.0 if equity_now > 0 else 0.0
                     target_qty = max_risk_quote / risk_per_unit if risk_per_unit > 0 else 0.0
                     reduce_qty = max(float(pos_after.get("filled_qty", 0.0)) - target_qty, 0.0)
@@ -1952,7 +1952,7 @@ def place_exit_order(state, symbol, reason, price, qty_override=None):
     remaining_entry = float(pos.get("entry", 0.0))
     remaining_sl = float(pos.get("sl", 0.0))
     remaining_risk = max(remaining_entry - remaining_sl, 0.0) * remaining
-    remaining_equity = get_equity(QUOTE_ASSET) + remaining_entry * remaining
+    remaining_equity = get_total_equity_quote(state)
     pos["actual_risk_quote"] = remaining_risk
     pos["actual_risk_pct"] = (remaining_risk / remaining_equity * 100.0) if remaining_equity > 0 else None
     pos["risk_breach"] = bool(pos["actual_risk_pct"] is not None and MAX_ACTUAL_RISK_PCT > 0 and pos["actual_risk_pct"] > MAX_ACTUAL_RISK_PCT)
@@ -2234,7 +2234,7 @@ def ensure_risk_tracking(state):
         rt["day_key"] = day_key
         rt["day_realized_pnl_quote"] = 0.0
         rt["day_realized_pnl_pct"] = 0.0
-        rt["day_start_equity"] = get_equity(QUOTE_ASSET) if TRADING_MODE != "off" else None
+        rt["day_start_equity"] = get_total_equity_quote(state) if TRADING_MODE != "off" else None
         rt["day_halted"] = False
         if was_halted:
             notify_event("▶️ Hari baru (UTC) dimulai, limit rugi harian direset. Entry baru diizinkan lagi.")
@@ -2244,7 +2244,7 @@ def ensure_risk_tracking(state):
         rt["week_key"] = week_key
         rt["week_realized_pnl_quote"] = 0.0
         rt["week_realized_pnl_pct"] = 0.0
-        rt["week_start_equity"] = get_equity(QUOTE_ASSET) if TRADING_MODE != "off" else None
+        rt["week_start_equity"] = get_total_equity_quote(state) if TRADING_MODE != "off" else None
         rt["week_halted"] = False
         if was_halted:
             notify_event("▶️ Minggu baru (UTC) dimulai, limit rugi mingguan direset. Entry baru diizinkan lagi.")
