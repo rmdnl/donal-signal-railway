@@ -17,15 +17,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 def env_bool(key, default=False):
     val = os.getenv(key)
     if val is None:
         return default
     return val.strip().lower() in ("1", "true", "yes", "y", "on")
 
+
 def env_list(key, default=""):
     val = os.getenv(key, default)
     return [x.strip().upper() for x in val.split(",") if x.strip()]
+
 
 def env_int(key, default):
     try:
@@ -33,11 +36,13 @@ def env_int(key, default):
     except Exception:
         return default
 
+
 def env_float(key, default):
     try:
         return float(os.getenv(key, str(default)))
     except Exception:
         return default
+
 
 # =====================
 # CONFIG
@@ -69,7 +74,11 @@ ADX_LENGTH = env_int("ADX_LENGTH", 14)
 ADX_THRESHOLD = env_float("ADX_THRESHOLD", 20.0)
 
 # --- Strategy variant ---
-
+STRATEGY_MODE = os.getenv("STRATEGY_MODE", "breakout").strip().lower()  # breakout | pullback
+STOCH_RSI_LENGTH = env_int("STOCH_RSI_LENGTH", 14)
+STOCH_RSI_OS = env_float("STOCH_RSI_OS", 20.0)
+PULLBACK_EMA_FAST = env_int("PULLBACK_EMA_FAST", 13)
+PULLBACK_EMA_SLOW = env_int("PULLBACK_EMA_SLOW", 34)
 VOLUME_MA_LENGTH = env_int("VOLUME_MA_LENGTH", 20)
 VOLUME_MULT = env_float("VOLUME_MULT", 1.0)
 
@@ -133,7 +142,7 @@ RISK_PCT_PER_TRADE = env_float("RISK_PCT_PER_TRADE", 1.0)
 # slippage-nya). Untuk exit TIDAK ada guard semacam ini -- exit harus selalu jalan
 # demi risk management, jadi cuma dilaporkan (bukan dibatalkan) berapa pun besarnya.
 MAX_ENTRY_SLIPPAGE_PCT = env_float("MAX_ENTRY_SLIPPAGE_PCT", 0.5)
-MAX_ACTUAL_RISK_PCT = env_float("MAX_ACTUAL_RISK_PCT", max(RISK_PCT_PER_TRADE * 1.25, RISK_PCT_PER_TRADE))
+MAX_ACTUAL_RISK_PCT = env_float("MAX_ACTUAL_RISK_PCT", RISK_PCT_PER_TRADE * 1.25)
 RISK_OVERSHOOT_ACTION = os.getenv("RISK_OVERSHOOT_ACTION", "reduce").strip().lower()  # reduce | exit | hold
 
 # Native Binance OCO (One-Cancels-the-Other): SL/TP disimpan DI EXCHANGE, tetap
@@ -141,7 +150,6 @@ RISK_OVERSHOOT_ACTION = os.getenv("RISK_OVERSHOOT_ACTION", "reduce").strip().low
 # bot otomatis fallback ke polling-based SL/TP (mekanisme lama) supaya posisi
 # tidak pernah dibiarkan tanpa proteksi sama sekali.
 USE_NATIVE_OCO_SLTP = env_bool("USE_NATIVE_OCO_SLTP", True)
-OCO_REPRICE_BUFFER_PCT = env_float("OCO_REPRICE_BUFFER_PCT", 0.15)
 
 # --- Break-Even (BE) Protection ---
 USE_BREAK_EVEN = env_bool("USE_BREAK_EVEN", True)
@@ -179,16 +187,22 @@ log = logging.getLogger("donal-signal-railway")
 
 RUNNING = True
 _telegram_warned = False
-_notify_last_time = {}
-NOTIFY_COOLDOWN_SEC = 300  # 5 menit cooldown buat notifikasi yang sama
+# [PATCH AUDIT] notify_throttled() dan state pendukungnya (_notify_last_time,
+# NOTIFY_COOLDOWN_SEC) dihapus: fungsi ini tidak pernah dipanggil di manapun.
+# Throttling notifikasi yang benar-benar aktif dipakai adalah notify_error_throttled()
+# di bawah, dengan dict cooldown-nya sendiri (_notify_last).
+
+
 
 def handle_shutdown(signum, frame):
     global RUNNING
     log.info("Shutdown signal diterima, menyimpan state dan berhenti...")
     RUNNING = False
 
+
 signal.signal(signal.SIGTERM, handle_shutdown)
 signal.signal(signal.SIGINT, handle_shutdown)
+
 
 def get_state_path():
     raw = os.getenv("STATE_FILE", "state_signals.json").strip()
@@ -214,11 +228,13 @@ def get_state_path():
         )
         return fallback
 
+
 STATE_FILE = get_state_path()
 HISTORY_FILE = Path(os.getenv("HISTORY_FILE", "trade_history.json").strip() or "trade_history.json")
 
 exchange = None
 VALID_SYMBOLS = []
+
 
 def parse_correlated_groups(raw):
     groups = []
@@ -228,13 +244,16 @@ def parse_correlated_groups(raw):
             groups.append(members)
     return groups
 
+
 CORRELATED_GROUPS = parse_correlated_groups(CORRELATED_GROUPS_RAW)
+
 
 def symbol_group_index(symbol):
     for idx, group in enumerate(CORRELATED_GROUPS):
         if symbol in group:
             return idx
     return None
+
 
 # =====================
 # HEALTH SERVER
@@ -249,6 +268,7 @@ class HealthHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+
 def start_health_server():
     if PORT <= 0:
         log.info("PORT tidak diset, health server tidak dijalankan.")
@@ -260,6 +280,7 @@ def start_health_server():
     except Exception as e:
         log.warning(f"Health server error: {e}")
 
+
 # =====================
 # UTILS
 # =====================
@@ -270,10 +291,12 @@ def fmt(x):
     except Exception:
         return str(x)
 
+
 def sleep_interruptible(seconds):
     end = time.time() + seconds
     while RUNNING and time.time() < end:
         time.sleep(1)
+
 
 def is_allowed_session(ts_ms):
     if not SESSION_FILTER_ENABLED:
@@ -284,6 +307,7 @@ def is_allowed_session(ts_ms):
         return SESSION_START_HOUR <= hour < SESSION_END_HOUR
     else:
         return hour >= SESSION_START_HOUR or hour < SESSION_END_HOUR
+
 
 # =====================
 # TELEGRAM
@@ -345,6 +369,7 @@ def notify_event(message):
     if TELEGRAM_ENABLED:
         send_telegram(message)
 
+
 def notify_error(message):
     log.error(message)
     if TELEGRAM_ENABLED and TELEGRAM_NOTIFY_ERRORS:
@@ -365,6 +390,8 @@ def notify_error_throttled(key, message):
         notify_error(message)
     else:
         log.warning(f"[throttled] {key}: {message}")
+
+
 
 # =====================
 # EXCHANGE
@@ -402,6 +429,7 @@ def make_exchange():
     ex.load_markets()
     return ex
 
+
 # =====================
 # STATE
 # =====================
@@ -417,6 +445,7 @@ def _default_state():
         "exit_intents": {},
         "risk_tracking": {},
     }
+
 
 def _normalize_state(data):
     """Validate the persisted state shape without silently accepting bad types."""
@@ -434,6 +463,7 @@ def _normalize_state(data):
             raise ValueError(f"state.{field} harus object/dict")
     state["version"] = max(int(state.get("version", 1) or 1), 4)
     return state
+
 
 def load_state():
     state = _default_state()
@@ -465,6 +495,7 @@ def load_state():
 
     return state
 
+
 def save_state(state):
     try:
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -474,6 +505,7 @@ def save_state(state):
         os.replace(tmp, STATE_FILE)
     except Exception as e:
         log.error(f"Gagal save state: {e}")
+
 
 def save_trade_history(symbol, pos, exit_price, reason, pnl_quote_gross=None, pnl_quote_net=None, fees_quote=None):
     """Simpan closed trade dengan gross/net PnL dan estimasi fee yang konsisten."""
@@ -530,8 +562,10 @@ def save_trade_history(symbol, pos, exit_price, reason, pnl_quote_gross=None, pn
 def ema(series, length):
     return series.ewm(span=length, adjust=False).mean()
 
+
 def rma(series, length):
     return series.ewm(alpha=1 / length, adjust=False).mean()
+
 
 def rsi(close, length):
     delta = close.diff()
@@ -542,7 +576,17 @@ def rsi(close, length):
     with np.errstate(divide="ignore", invalid="ignore"):
         rs = avg_gain / avg_loss
         out = 100 - (100 / (1 + rs))
-    return out
+    return out.fillna(50.0)
+
+def stochastic_rsi(close, length=14, k_smooth=3, d_smooth=3):
+    rsi_vals = rsi(close, length)
+    lo = rsi_vals.rolling(length).min()
+    hi = rsi_vals.rolling(length).max()
+    stoch = 100 * (rsi_vals - lo) / (hi - lo).replace(0, np.nan)
+    k = stoch.rolling(k_smooth).mean()
+    d = k.rolling(d_smooth).mean()
+    return k, d
+
 
 def atr(df, length):
     high = df["high"]
@@ -559,6 +603,7 @@ def atr(df, length):
     ).max(axis=1)
     tr = tr.fillna(high - low)
     return rma(tr, length)
+
 
 def adx(df, length=14):
     """ADX dihitung pakai fungsi atr() yang udah ada biar efisien."""
@@ -581,7 +626,7 @@ def adx(df, length=14):
     dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
     adx_val = rma(dx, length)
     
-    return adx_val
+    return adx_val.fillna(0.0)
 
 def find_last_pivots(df, left, right):
     highs = df["high"].values
@@ -610,6 +655,7 @@ def find_last_pivots(df, left, right):
 
     return last_high, last_low
 
+
 # =====================
 # DATA
 # =====================
@@ -632,12 +678,14 @@ def fetch_closed_ohlcv(symbol, timeframe, limit=300):
 
     return df.reset_index(drop=True)
 
+
 # =====================
 # HTF TREND CACHE
 # =====================
 # 4H trend only changes once per HTF candle, so cache it per symbol and only
 # refetch when a new HTF candle has actually closed instead of every loop tick.
 _htf_trend_cache = {}
+
 
 def get_htf_bull_trend(symbol):
     tf_ms = exchange.parse_timeframe(HTF_TIMEFRAME) * 1000
@@ -650,13 +698,18 @@ def get_htf_bull_trend(symbol):
     df4h = fetch_closed_ohlcv(symbol, HTF_TIMEFRAME, 100)
     df4h["ema20"] = ema(df4h["close"], 20)
     df4h["ema60"] = ema(df4h["close"], 60)
+    df4h["ema13"] = ema(df4h["close"], PULLBACK_EMA_FAST)
+    df4h["ema34"] = ema(df4h["close"], PULLBACK_EMA_SLOW)
     df4h["rsi14"] = rsi(df4h["close"], RSI_LENGTH)
     htf = df4h.iloc[-1]
 
-    if pd.isna(htf["ema20"]) or pd.isna(htf["ema60"]) or pd.isna(htf["rsi14"]):
+    if pd.isna(htf["ema20"]) or pd.isna(htf["ema60"]) or pd.isna(htf["ema13"]) or pd.isna(htf["ema34"]) or pd.isna(htf["rsi14"]):
         return None
 
-    bull_trend = bool(htf["ema20"] > htf["ema60"] and htf["rsi14"] > 50)
+    if STRATEGY_MODE == "pullback":
+        bull_trend = bool(htf["ema13"] > htf["ema34"] and htf["rsi14"] > 50)
+    else:
+        bull_trend = bool(htf["ema20"] > htf["ema60"] and htf["rsi14"] > 50)
     bar_ts = int(htf["ts"])
     # Valid until the NEXT HTF candle closes (current bar closes at bar_ts+tf_ms,
     # the one after that at bar_ts+2*tf_ms -- that's when a fresher value exists).
@@ -664,6 +717,7 @@ def get_htf_bull_trend(symbol):
 
     _htf_trend_cache[symbol] = {"bull_trend": bull_trend, "expires_at": expires_at}
     return bull_trend
+
 
 # =====================
 # SIGNAL (Candle Close) - Pine breakoutTrigger
@@ -675,6 +729,17 @@ def calculate_signal(symbol):
         log.info(f"{symbol}: data candle belum cukup.")
         return None
 
+    # [PATCH AUDIT] rsi()/adx() melakukan .fillna(50.0)/.fillna(0.0) di dalam
+    # fungsinya sendiri, sehingga guard NaN di bawah (pada indikator turunan)
+    # tidak akan pernah menangkap kasus data candle mentah yang bolong (gap
+    # akibat gangguan exchange, pair baru listing, dll) -- nilainya akan
+    # terlanjur "disamarkan" jadi netral sebelum sempat dicek. Guard di sini
+    # mengecek data mentah dulu, sebelum smoothing indikator terjadi.
+    recent_raw = df1h[["close", "high", "low", "volume"]].tail(max(RSI_LENGTH, ADX_LENGTH) + 5)
+    if recent_raw.isnull().values.any():
+        log.warning(f"{symbol}: ada data candle mentah (close/high/low/volume) yang kosong/NaN, skip sinyal.")
+        return None
+
     df1h["ema20"] = ema(df1h["close"], 20)
     df1h["rsi14"] = rsi(df1h["close"], RSI_LENGTH)
     df1h["hh20_prev"] = df1h["high"].rolling(20).max().shift(1)
@@ -683,6 +748,11 @@ def calculate_signal(symbol):
         df1h["adx"] = adx(df1h, ADX_LENGTH)
     df1h["volume_ma"] = df1h["volume"].rolling(VOLUME_MA_LENGTH).mean()
     df1h["atr_ma"] = df1h["atr14"].rolling(ATR_MA_LENGTH).mean()
+    if STRATEGY_MODE == "pullback":
+        stoch_k, stoch_d = stochastic_rsi(df1h["close"], STOCH_RSI_LENGTH)
+        df1h["stoch_k"] = stoch_k
+        df1h["stoch_d"] = stoch_d
+
     bull_trend = get_htf_bull_trend(symbol)
     if bull_trend is None:
         log.info(f"{symbol}: data HTF belum cukup.")
@@ -703,6 +773,9 @@ def calculate_signal(symbol):
         required.append(row["adx"])
     if USE_VOL_SCALED_SLTP:
         required.append(row["atr_ma"])
+    if STRATEGY_MODE == "pullback":
+        required.append(row["stoch_k"])
+        required.append(row["stoch_d"])
     if any(pd.isna(x) for x in required):
         log.info(f"{symbol}: indikator masih NaN.")
         return None
@@ -712,14 +785,25 @@ def calculate_signal(symbol):
 
     last_pivot_high, last_pivot_low = find_last_pivots(df1h, SR_LEFT_BARS, SR_RIGHT_BARS)
 
-    # breakoutTrigger di Pine: close > ema20 AND rsi14 > rsiEntryLv AND close > hhN
-    higher_low_ok = True
-    pb_vol_ok = True
-    buy_trigger = bool(
-    close > row["ema20"]
-    and row["rsi14"] > RSI_ENTRY
-    and close > row["hh20_prev"]
-    )
+    if STRATEGY_MODE == "pullback":
+        # Pullback: StochRSI cross-up keluar dari oversold = trigger
+        prev_k = float(df1h["stoch_k"].iloc[-2])
+        prev_d = float(df1h["stoch_d"].iloc[-2])
+        cross_up = bool(prev_k <= prev_d and float(row["stoch_k"]) > float(row["stoch_d"]))
+        was_oversold = bool(prev_k < STOCH_RSI_OS)
+        recent_low = float(df1h["low"].iloc[-10:].min())
+        higher_low_ok = (last_pivot_low is None) or (recent_low >= last_pivot_low * 0.995)
+        pb_vol_ok = (not USE_VOLUME_FILTER) or bool(float(row["volume"]) > float(df1h["volume"].iloc[-2]))
+        buy_trigger = bool(cross_up and was_oversold)
+    else:
+        # breakoutTrigger di Pine: close > ema20 AND rsi14 > rsiEntryLv AND close > hhN
+        higher_low_ok = True
+        pb_vol_ok = True
+        buy_trigger = bool(
+            close > row["ema20"]
+            and row["rsi14"] > RSI_ENTRY
+            and close > row["hh20_prev"]
+        )
 
     room_to_resistance = None
     if last_pivot_high is not None and last_pivot_high > close:
@@ -756,7 +840,15 @@ def calculate_signal(symbol):
             sl_mult = SL_MULT * vol_scale
             tp_mult = TP_MULT * vol_scale
 
-    buy_signal = bool(bull_trend and buy_trigger and res_room_ok and volume_ok and session_ok and adx_ok)
+    if STRATEGY_MODE == "pullback":
+        # [PATCH AUDIT] res_room_ok ditambahkan supaya entry pullback juga tidak
+        # mepet ke resistance terdekat, konsisten dengan mode breakout.
+        buy_signal = bool(
+            bull_trend and buy_trigger and higher_low_ok and pb_vol_ok
+            and res_room_ok and session_ok and adx_ok
+        )
+    else:
+        buy_signal = bool(bull_trend and buy_trigger and res_room_ok and volume_ok and session_ok and adx_ok)
 
     exit_trend = bool(close < row["ema20"] or row["rsi14"] < RSI_EXIT)
 
@@ -781,6 +873,7 @@ def calculate_signal(symbol):
         "session_ok": session_ok,
     }
 
+
 def should_check_signal(state, symbol):
     last = int(state.get("last_bar_ts", {}).get(symbol, 0) or 0)
     if last == 0:
@@ -788,6 +881,7 @@ def should_check_signal(state, symbol):
     tf_ms = exchange.parse_timeframe(TIMEFRAME) * 1000
     now = int(time.time() * 1000) - (CANDLE_CONFIRM_OFFSET_SEC * 1000)
     return now >= last + tf_ms
+
 
 def entry_too_old(bar_ts):
     if MAX_ENTRY_DELAY_MINUTES <= 0:
@@ -799,6 +893,7 @@ def entry_too_old(bar_ts):
     max_age_ms = MAX_ENTRY_DELAY_MINUTES * 60 * 1000
     return age_ms > max_age_ms
 
+
 # =====================
 # PRICE
 # =====================
@@ -809,6 +904,7 @@ def get_ticker_price(symbol):
             return float(t[key])
     raise RuntimeError(f"Harga ticker kosong untuk {symbol}")
 
+
 def get_best_bid_ask(symbol):
     t = exchange.fetch_ticker(symbol)
     bid = t.get("bid") or t.get("last")
@@ -817,8 +913,10 @@ def get_best_bid_ask(symbol):
         raise RuntimeError(f"Bid/ask kosong untuk {symbol}")
     return float(bid), float(ask)
 
+
 def _binance_symbol(symbol):
     return symbol.replace("/", "").replace(":USDT", "")
+
 
 def _client_order_id(prefix, symbol, seed):
     # Binance client IDs must be short, deterministic for retries, and contain
@@ -827,6 +925,7 @@ def _client_order_id(prefix, symbol, seed):
     # find the original order instead of creating a second order.
     digest = hashlib.sha1(f"{symbol}|{seed}".encode()).hexdigest()[:24]
     return f"{prefix}{digest}"[:36]
+
 
 def _raw_private(method_names, params):
     last_error = None
@@ -843,6 +942,7 @@ def _raw_private(method_names, params):
             if not isinstance(exc, (AttributeError, NotImplementedError)):
                 raise
     raise RuntimeError(f"Binance raw method unavailable: {method_names}") from last_error
+
 
 def _normalize_binance_order(order):
     if not isinstance(order, dict):
@@ -867,6 +967,7 @@ def _normalize_binance_order(order):
         ),
     }
 
+
 def _is_definitive_not_found(exc):
     """True only when the exchange explicitly says the requested object is absent."""
     if isinstance(exc, ccxt.OrderNotFound):
@@ -875,6 +976,7 @@ def _is_definitive_not_found(exc):
     info = getattr(exc, "args", None)
     blob = f"{text} {info}".lower()
     return any(code in blob for code in ("-2011", "-2013", "-2018", "unknown order sent", "order does not exist", "order list does not exist", "order not found"))
+
 
 def lookup_order_by_client_id(symbol, client_order_id):
     """Return (FOUND|NOT_FOUND|UNKNOWN, order).
@@ -916,10 +1018,12 @@ def lookup_order_by_client_id(symbol, client_order_id):
                 break
     return ("UNKNOWN", None) if saw_unknown else ("NOT_FOUND", None)
 
+
 def find_order_by_client_id(symbol, client_order_id):
     """Backward-compatible wrapper. Call lookup_order_by_client_id in safety-critical paths."""
     status, order = lookup_order_by_client_id(symbol, client_order_id)
     return order if status == "FOUND" else None
+
 
 def lookup_oco_by_client_id(symbol, list_client_order_id):
     """Return (FOUND|NOT_FOUND|UNKNOWN, order-list response)."""
@@ -961,9 +1065,11 @@ def lookup_oco_by_client_id(symbol, list_client_order_id):
                 break
     return ("UNKNOWN", None) if saw_unknown else ("NOT_FOUND", None)
 
+
 def find_oco_by_client_id(symbol, list_client_order_id):
     status, item = lookup_oco_by_client_id(symbol, list_client_order_id)
     return item if status == "FOUND" else None
+
 
 # =====================
 # AUTO TRADING (Binance API) -- hanya dipakai kalau TRADING_MODE != "off"
@@ -982,6 +1088,7 @@ def get_available_quote(quote_asset=None):
         log.warning(f"Gagal fetch available {quote_asset}: {e}")
         return 0.0
 
+
 def get_equity(quote_asset=None):
     """Return total quote balance, not only free balance."""
     quote_asset = quote_asset or QUOTE_ASSET
@@ -999,24 +1106,40 @@ def get_equity(quote_asset=None):
         log.warning(f"Gagal fetch total balance {quote_asset}: {e}")
         return 0.0
 
-def get_total_equity_quote(state):
-    """Ekuitas riil = cash USDT + nilai pasar semua posisi terbuka di state."""
-    cash = get_equity(QUOTE_ASSET)
-    positions = state.get("virtual_positions", {}) if isinstance(state, dict) else {}
-    value = 0.0
-    for sym, pos in positions.items():
+
+def get_total_equity(state, quote_asset=None):
+    """
+    [PATCH AUDIT] Ekuitas total = saldo quote (get_equity) + nilai mark-to-market
+    semua posisi bot yang sedang terbuka (qty * harga pasar terkini).
+
+    get_equity() sendiri cuma melihat saldo quote asset (mis. USDT). Begitu ada
+    posisi terbuka, sebagian modal "berpindah" jadi base asset (BTC/ETH/dst) dan
+    tidak lagi tampak di saldo quote -- padahal itu tetap bagian dari ekuitas
+    riil. Kalau position sizing & snapshot loss-limit harian/mingguan cuma pakai
+    get_equity(), makin banyak posisi terbuka -> makin kecil basis modalnya,
+    padahal modal riil belum tentu berkurang. Fungsi ini dipakai supaya semua
+    perhitungan risk % konsisten terhadap total modal, bukan cuma sisa saldo
+    quote yang belum terpakai.
+    """
+    quote_asset = quote_asset or QUOTE_ASSET
+    quote_bal = get_equity(quote_asset)
+    positions = state.get("virtual_positions", {}) if state else {}
+    open_value = 0.0
+    for pos_symbol, pos in positions.items():
         qty = float(pos.get("filled_qty") or pos.get("qty") or 0.0)
         if qty <= 0:
             continue
-        px = None
+        price = None
         try:
-            px = get_ticker_price(sym)
+            price = get_ticker_price(pos_symbol)
         except Exception:
-            px = None
-        if not px:
-            px = float(pos.get("entry", 0.0) or 0.0)
-        value += qty * float(px)
-    return cash + value
+            price = None
+        if not price:
+            # Fallback: harga entry, lebih baik dari 0 kalau ticker gagal diambil.
+            price = float(pos.get("entry") or 0.0)
+        open_value += qty * price
+    return quote_bal + open_value
+
 
 def compute_sl_tp(signal_data, entry):
     """
@@ -1049,16 +1172,21 @@ def compute_sl_tp(signal_data, entry):
     sltp_note = f"Struktur S/R: {', '.join(structure_used)}" if structure_used else "SL/TP: ATR"
     return sl, tp, sltp_note
 
+
 def calculate_position_size(state, symbol, entry_price, sl_price):
     """
-    Risk-based sizing: qty = (equity_quote * RISK_PCT_PER_TRADE%) / (entry - SL).
+    Risk-based sizing: qty = (equity_total * RISK_PCT_PER_TRADE%) / (entry - SL).
     Dibatasi presisi & minimum order exchange. Return None kalau tidak valid/tidak cukup.
+
+    [PATCH AUDIT] equity dihitung dengan get_total_equity() (saldo quote + nilai
+    posisi bot yang sedang terbuka), bukan get_equity() saja, supaya risk % per
+    trade konsisten terhadap total modal walau sedang ada posisi lain berjalan.
     """
     if entry_price <= 0 or sl_price <= 0 or sl_price >= entry_price:
         log.warning(f"{symbol}: entry/SL tidak valid untuk sizing (entry={entry_price}, sl={sl_price}).")
         return None
 
-    equity = get_total_equity_quote(state)
+    equity = get_total_equity(state, QUOTE_ASSET)
     available_quote = get_available_quote(QUOTE_ASSET)
     if equity <= 0 or available_quote <= 0:
         log.warning(f"{symbol}: saldo {QUOTE_ASSET} 0 atau gagal diambil, skip sizing.")
@@ -1091,6 +1219,7 @@ def calculate_position_size(state, symbol, entry_price, sl_price):
         return None
 
     return qty
+
 
 def place_entry_order(state, symbol, signal_data, market_price):
     """
@@ -1175,7 +1304,8 @@ def place_entry_order(state, symbol, signal_data, market_price):
             # same deterministic client ID may be submitted again exactly once.
             order = None
     else:
-        equity_for_plan = get_total_equity_quote(state)
+        # [PATCH AUDIT] konsisten dengan calculate_position_size(): pakai equity total.
+        equity_for_plan = get_total_equity(state, QUOTE_ASSET)
         planned_risk_quote = max(ask - sl_ref, 0.0) * qty
         intents[symbol] = {
             "client_order_id": client_id,
@@ -1279,7 +1409,11 @@ def place_entry_order(state, symbol, signal_data, market_price):
     realized_slippage_pct = (avg_price - market_price) / market_price * 100.0
     risk_per_unit = max(avg_price - sl, 0.0)
     actual_risk_quote = risk_per_unit * filled_qty
-    actual_equity = get_total_equity_quote(state) + (avg_price * filled_qty)
+    # [PATCH AUDIT] get_total_equity(state) sudah menjumlahkan posisi bot lain yang
+    # sedang terbuka (kalau ada); posisi symbol ini sendiri belum ditulis ke state
+    # di titik ini, jadi (avg_price * filled_qty) tetap perlu ditambahkan manual
+    # untuk merekonstruksi ekuitas "sebelum trade ini terjadi".
+    actual_equity = get_total_equity(state, QUOTE_ASSET) + (avg_price * filled_qty)
     actual_risk_pct = (actual_risk_quote / actual_equity * 100.0) if actual_equity > 0 else None
 
     # Enforce a post-fill risk ceiling. A market fill can move far enough from the
@@ -1313,17 +1447,20 @@ def place_entry_order(state, symbol, signal_data, market_price):
     }
     intents.pop(symbol, None)
 
+    # [PATCH AUDIT] Sebelumnya pesan ini ditulis sebagai satu ekspresi ternary dari
+    # f-string yang saling menempel (concatenation implisit sebelum "if" dan sesudah
+    # "else"). Hasilnya benar secara fungsional, tapi gampang salah baca/salah edit.
+    # Ditulis ulang jadi if/else eksplisit dengan perilaku yang identik.
     risk_line = f"Risk aktual: {fmt(actual_risk_quote)} {QUOTE_ASSET}"
     if actual_risk_pct is not None:
         risk_line += f" ({actual_risk_pct:+.3f}% equity)"
-    msg = (
+    notify_event(
         f"🟢 ENTRY FILLED {symbol} [{TRADING_MODE.upper()}] (MARKET)\n"
         f"Harga fill: {fmt(avg_price)} (referensi: {fmt(market_price)})\n"
         f"Slippage entry: {realized_slippage_pct:+.3f}%\n"
         f"Qty: {fmt(filled_qty)}\n"
         f"{risk_line}\n"
     )
-    notify_event(msg)
 
     save_state(state)
     try_place_native_protection(state, symbol)
@@ -1338,7 +1475,11 @@ def place_entry_order(state, symbol, signal_data, market_price):
                     trigger_exit(state, symbol, "RISK LIMIT EXIT", get_ticker_price(symbol))
                 else:
                     risk_per_unit = max(float(pos_after.get("entry", 0.0)) - float(pos_after.get("sl", 0.0)), 0.0)
-                    equity_now = get_total_equity_quote(state)
+                    # [PATCH AUDIT] pos_after sudah tercatat di state["virtual_positions"],
+                    # jadi get_total_equity() di sini SUDAH menghitung posisi ini (mark-to-
+                    # market harga sekarang) -- tidak perlu ditambah manual lagi (hindari
+                    # double count).
+                    equity_now = get_total_equity(state, QUOTE_ASSET)
                     max_risk_quote = equity_now * MAX_ACTUAL_RISK_PCT / 100.0 if equity_now > 0 else 0.0
                     target_qty = max_risk_quote / risk_per_unit if risk_per_unit > 0 else 0.0
                     reduce_qty = max(float(pos_after.get("filled_qty", 0.0)) - target_qty, 0.0)
@@ -1350,6 +1491,7 @@ def place_entry_order(state, symbol, signal_data, market_price):
             else:
                 pos_after["risk_breach"] = True
                 save_state(state)
+
 
 # =====================
 # NATIVE BINANCE OCO (SL/TP tersimpan di exchange, tahan bot restart/offline)
@@ -1421,11 +1563,13 @@ def place_oco_exit(symbol, qty, tp_price, sl_stop_price, list_client_order_id=No
         "sl_client_order_id": below_client_id,
     }
 
+
 def cancel_oco_exit(symbol, order_list_id):
     if not order_list_id:
         return None
     params = {"symbol": _binance_symbol(symbol), "orderListId": int(order_list_id)}
     return _raw_private(("private_delete_order_list", "privateDeleteOrderList"), params)
+
 
 def _apply_oco_to_position(pos, oco):
     pos["status"] = "open_oco"
@@ -1435,6 +1579,7 @@ def _apply_oco_to_position(pos, oco):
     pos["oco_list_client_order_id"] = oco.get("list_client_order_id")
     pos["oco_tp_client_order_id"] = oco.get("tp_client_order_id")
     pos["oco_sl_client_order_id"] = oco.get("sl_client_order_id")
+
 
 def _extract_oco_child_ids(symbol, oco_response, intent=None):
     info = oco_response.get("info", oco_response) if isinstance(oco_response, dict) else {}
@@ -1471,8 +1616,10 @@ def _extract_oco_child_ids(symbol, oco_response, intent=None):
                 tp_id = tp_id or leg_id
     return info.get("orderListId") or oco_response.get("orderListId"), tp_id, sl_id
 
+
 class OcoPreflightError(RuntimeError):
     pass
+
 
 def validate_oco_prices(symbol, tp_price, sl_stop_price):
     """Preflight native SELL OCO against current book so crossed prices fail safely."""
@@ -1482,6 +1629,7 @@ def validate_oco_prices(symbol, tp_price, sl_stop_price):
     if sl_stop_price >= bid:
         raise OcoPreflightError(f"SL {sl_stop_price} sudah terpicu/ter-crossed terhadap bid {bid}")
     return bid, ask
+
 
 def mark_protection_unknown(state, symbol, reason):
     pos = state.get("virtual_positions", {}).get(symbol)
@@ -1493,19 +1641,6 @@ def mark_protection_unknown(state, symbol, reason):
     save_state(state)
     notify_error(f"{symbol}: PROTECTION UNKNOWN: {reason}. Tidak ada blind retry/duplicate SELL.")
 
-def reprice_tp_if_crossed(symbol, tp, sl):
-    """Re-price sekali kalau TP ter-crossed karena harga pump cepat setelah fill."""
-    bid, ask = get_best_bid_ask(symbol)
-    if bid <= 0 or ask <= 0:
-        raise OcoPreflightError("book kosong, re-price tidak mungkin")
-    if sl >= bid:
-        raise OcoPreflightError(f"SL {sl} ter-crossed terhadap bid {bid}; flatten lebih disiplin")
-    if tp > ask:
-        return tp, sl
-    new_tp = ask * (1 + OCO_REPRICE_BUFFER_PCT / 100.0)
-    if new_tp <= ask or new_tp <= sl:
-        raise OcoPreflightError("hasil re-price TP tidak valid")
-    return new_tp, sl
 
 def try_place_native_protection(state, symbol):
     """
@@ -1651,47 +1786,6 @@ def try_place_native_protection(state, symbol):
         # safely abandon the intent and flatten the just-opened position instead
         # of leaving it naked. This is NOT used when lookup itself is UNKNOWN.
         if oco_lookup_status == "NOT_FOUND" and isinstance(e, (OcoPreflightError, ccxt.InvalidOrder)):
-            # --- SMART RE-PRICE 1x: kalau TP ter-crossed karena harga pump ---
-            if not intent.get("repriced"):
-                intent["repriced"] = True
-                new_list_id = None
-                try:
-                    new_tp, new_sl = reprice_tp_if_crossed(symbol, tp, sl)
-                    new_tp_p = float(exchange.price_to_precision(symbol, new_tp))
-                    new_sl_p = float(exchange.price_to_precision(symbol, new_sl))
-                    pos["tp"] = new_tp_p
-                    pos["sl"] = new_sl_p
-                    save_state(state)
-                    new_list_id = _client_order_id("DONALO", symbol, f"{pos.get('entry_client_order_id')}|reprice|{int(time.time()*1000)}")
-                    oco = place_oco_exit(symbol, qty_p, new_tp_p, new_sl_p, new_list_id)
-                    _apply_oco_to_position(pos, oco)
-                    intents.pop(symbol, None)
-                    save_state(state)
-                    notify_event(
-                        f"🛡️ OCO RE-PRICED AKTIF {symbol} [{TRADING_MODE.upper()}]\n"
-                        f"Harga lompat melewati TP lama; proteksi disesuaikan sekali.\n"
-                        f"TP baru: {fmt(new_tp_p)} | SL: {fmt(new_sl_p)}\n"
-                        f"Order List ID: {oco['order_list_id']}"
-                    )
-                    return
-                except Exception as re_err:
-                    re_status = "NOT_FOUND"
-                    if new_list_id is not None:
-                        re_status, re_oco = lookup_oco_by_client_id(symbol, new_list_id)
-                        if re_oco:
-                            order_list_id, tp_id, sl_id = _extract_oco_child_ids(symbol, re_oco, intent)
-                            if order_list_id and tp_id and sl_id:
-                                _apply_oco_to_position(pos, {
-                                    "order_list_id": order_list_id, "tp_order_id": tp_id, "sl_order_id": sl_id,
-                                    "list_client_order_id": new_list_id,
-                                })
-                                intents.pop(symbol, None)
-                                save_state(state)
-                                return
-                    if re_status == "UNKNOWN":
-                        mark_protection_unknown(state, symbol, f"re-price OCO ambigu: {re_err}")
-                        return
-                    log.warning(f"{symbol}: re-price gagal ({re_err}); lanjut emergency exit.")
             intents.pop(symbol, None)
             pos["status"] = "open"
             pos["protection_reconciliation_required"] = False
@@ -1707,6 +1801,7 @@ def try_place_native_protection(state, symbol):
         # a recoverable protection problem. Do not blindly submit a new OCO.
         mark_protection_unknown(state, symbol, f"OCO request failed after confirmed absence: {e}")
 
+
 def _is_dust_remainder(symbol, qty):
     """Return True only when a remainder is below the exchange minimum amount."""
     if qty <= 0:
@@ -1716,6 +1811,7 @@ def _is_dust_remainder(symbol, qty):
     if min_amount:
         return qty < float(min_amount) * 1.001
     return qty < 1e-12
+
 
 def process_open_oco_position(state, symbol):
     """Reconcile child order fills and recover cleanly after bot/VPS restart."""
@@ -1801,6 +1897,7 @@ def process_open_oco_position(state, symbol):
         state.setdefault("oco_intents", {}).pop(symbol, None)
         save_state(state)
         try_place_native_protection(state, symbol)
+
 
 def place_exit_order(state, symbol, reason, price, qty_override=None):
     """Idempotent MARKET SELL with persisted clientOrderId + reconciliation.
@@ -1922,7 +2019,10 @@ def place_exit_order(state, symbol, reason, price, qty_override=None):
     remaining_entry = float(pos.get("entry", 0.0))
     remaining_sl = float(pos.get("sl", 0.0))
     remaining_risk = max(remaining_entry - remaining_sl, 0.0) * remaining
-    remaining_equity = get_total_equity_quote(state)
+    # [PATCH AUDIT] pos (termasuk qty tersisa) sudah termutasi di state di atas,
+    # jadi get_total_equity() otomatis menghitungnya (di harga pasar sekarang) --
+    # tidak perlu ditambah manual lagi.
+    remaining_equity = get_total_equity(state, QUOTE_ASSET)
     pos["actual_risk_quote"] = remaining_risk
     pos["actual_risk_pct"] = (remaining_risk / remaining_equity * 100.0) if remaining_equity > 0 else None
     pos["risk_breach"] = bool(pos["actual_risk_pct"] is not None and MAX_ACTUAL_RISK_PCT > 0 and pos["actual_risk_pct"] > MAX_ACTUAL_RISK_PCT)
@@ -1934,6 +2034,7 @@ def place_exit_order(state, symbol, reason, price, qty_override=None):
         f"↪️ {symbol}: SELL partial {fmt(filled_qty)}/{fmt(position_qty)}. "
         f"Sisa posisi {fmt(remaining)} diproteksi ulang."
     )
+
 
 def record_partial_exit(state, symbol, pos_slice, exit_price, reason, slippage_pct=None):
     """Record one executed exit slice without deleting the remaining position."""
@@ -1952,6 +2053,7 @@ def record_partial_exit(state, symbol, pos_slice, exit_price, reason, slippage_p
     )
     record_realized_pnl(state, pnl_pct_net, pnl_quote=pnl_net)
     save_state(state)
+
 
 def finalize_exit(state, symbol, reason, exit_price, exit_qty=None, slippage_pct=None):
     positions = state.get("virtual_positions", {})
@@ -2001,11 +2103,13 @@ def finalize_exit(state, symbol, reason, exit_price, exit_qty=None, slippage_pct
     )
     notify_event(msg)
 
+
 def trigger_entry(state, symbol, signal_data, market_price):
     if TRADING_MODE == "off":
         send_buy_alert(state, symbol, signal_data, market_price)
     else:
         place_entry_order(state, symbol, signal_data, market_price)
+
 
 def trigger_exit(state, symbol, reason, price, qty_override=None):
     positions = state.get("virtual_positions", {})
@@ -2064,6 +2168,7 @@ def trigger_exit(state, symbol, reason, price, qty_override=None):
         save_state(state)
 
     place_exit_order(state, symbol, reason, price, qty_override=qty_override)
+
 
 # =====================
 # ALERTS
@@ -2131,6 +2236,7 @@ def send_buy_alert(state, symbol, signal_data, market_price=None):
     )
     notify_event(msg)
 
+
 def send_exit_alert(state, symbol, reason, price=None):
     positions = state.setdefault("virtual_positions", {})
     pos = positions.get(symbol)
@@ -2171,15 +2277,18 @@ def send_exit_alert(state, symbol, reason, price=None):
     )
     notify_event(msg)
 
+
 # =====================
 # DAILY / WEEKLY LOSS LIMIT (circuit breaker)
 # =====================
 def get_day_key():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
+
 def get_week_key():
     iso = datetime.now(timezone.utc).isocalendar()
     return f"{iso[0]}-W{iso[1]:02d}"
+
 
 def ensure_risk_tracking(state):
     """
@@ -2195,7 +2304,10 @@ def ensure_risk_tracking(state):
         rt["day_key"] = day_key
         rt["day_realized_pnl_quote"] = 0.0
         rt["day_realized_pnl_pct"] = 0.0
-        rt["day_start_equity"] = get_total_equity_quote(state) if TRADING_MODE != "off" else None
+        # [PATCH AUDIT] pakai equity total (quote + mark-to-market posisi terbuka)
+        # supaya limit rugi harian % dihitung dari modal riil, bukan cuma sisa
+        # saldo quote yang kebetulan belum terpakai di awal hari.
+        rt["day_start_equity"] = get_total_equity(state, QUOTE_ASSET) if TRADING_MODE != "off" else None
         rt["day_halted"] = False
         if was_halted:
             notify_event("▶️ Hari baru (UTC) dimulai, limit rugi harian direset. Entry baru diizinkan lagi.")
@@ -2205,12 +2317,14 @@ def ensure_risk_tracking(state):
         rt["week_key"] = week_key
         rt["week_realized_pnl_quote"] = 0.0
         rt["week_realized_pnl_pct"] = 0.0
-        rt["week_start_equity"] = get_total_equity_quote(state) if TRADING_MODE != "off" else None
+        # [PATCH AUDIT] sama seperti day_start_equity di atas.
+        rt["week_start_equity"] = get_total_equity(state, QUOTE_ASSET) if TRADING_MODE != "off" else None
         rt["week_halted"] = False
         if was_halted:
             notify_event("▶️ Minggu baru (UTC) dimulai, limit rugi mingguan direset. Entry baru diizinkan lagi.")
 
     return rt
+
 
 def record_realized_pnl(state, pnl_pct_net, pnl_quote=None):
     """
@@ -2223,6 +2337,7 @@ def record_realized_pnl(state, pnl_pct_net, pnl_quote=None):
     if pnl_quote is not None:
         rt["day_realized_pnl_quote"] = rt.get("day_realized_pnl_quote", 0.0) + pnl_quote
         rt["week_realized_pnl_quote"] = rt.get("week_realized_pnl_quote", 0.0) + pnl_quote
+
 
 def _loss_limit_breached(rt, period, limit_pct):
     if limit_pct <= 0:
@@ -2243,6 +2358,7 @@ def _loss_limit_breached(rt, period, limit_pct):
     if loss_pct >= limit_pct:
         return True, f"{realized_pct:+.2f}% (akumulasi sinyal, bukan saldo riil)"
     return False, ""
+
 
 def check_loss_limits_and_maybe_halt(state):
     """
@@ -2276,6 +2392,7 @@ def check_loss_limits_and_maybe_halt(state):
 
     return halted
 
+
 # =====================
 # EXPOSURE / CORRELATION GUARD
 # =====================
@@ -2303,6 +2420,7 @@ def exposure_ok(state, symbol):
                 return False
 
     return True
+
 
 # =====================
 # PROCESS SYMBOL (dengan cache harga)
@@ -2358,8 +2476,7 @@ def reconcile_pending_orders(state):
             log.warning(f"{symbol}: pending BUY intent {client_id} lookup UNKNOWN; recovery ditahan.")
             continue
         if not order:
-            log.warning(f"{symbol}: pending BUY intent {client_id} tidak ditemukan di exchange; dihapus dari state.")
-            state.setdefault("entry_intents", {}).pop(symbol, None)
+            log.warning(f"{symbol}: pending BUY intent {client_id} belum ditemukan; tidak membuat duplicate BUY.")
             continue
         signal_data = intent.get("signal_data") or {}
         reference_price = float(intent.get("reference_price") or signal_data.get("close") or 0.0)
@@ -2373,9 +2490,6 @@ def reconcile_pending_orders(state):
     for symbol in list(state.get("oco_intents", {})):
         if symbol in state.get("virtual_positions", {}):
             try_place_native_protection(state, symbol)
-        else:
-            state.setdefault("oco_intents", {}).pop(symbol, None)
-            log.info(f"{symbol}: orphaned OCO intent dibersihkan (posisi sudah tidak ada).")
 
     for symbol, intent in list(state.get("exit_intents", {}).items()):
         client_id = intent.get("client_order_id")
@@ -2384,8 +2498,7 @@ def reconcile_pending_orders(state):
             log.warning(f"{symbol}: pending SELL intent {client_id} lookup UNKNOWN; recovery ditahan.")
             continue
         if not order:
-            log.warning(f"{symbol}: pending SELL intent {client_id} tidak ditemukan di exchange; dihapus dari state.")
-            state.setdefault("exit_intents", {}).pop(symbol, None)
+            log.warning(f"{symbol}: pending SELL intent {client_id} belum ditemukan; tidak membuat duplicate SELL.")
             continue
         pos = state.get("virtual_positions", {}).get(symbol)
         if pos:
@@ -2396,6 +2509,7 @@ def reconcile_pending_orders(state):
                 float(order.get("average") or order.get("price") or 0.0),
                 qty_override=float(intent.get("qty") or 0.0) if not intent.get("full_close", True) else None,
             )
+
 
 def process_symbol(state, symbol, price_cache):
     if symbol not in exchange.markets:
@@ -2547,6 +2661,7 @@ def process_symbol(state, symbol, price_cache):
             trigger_entry(state, symbol, signal_data, market_price)
             state.setdefault("last_buy_alert_bar", {})[symbol] = signal_bar
 
+
 # =====================
 # MAIN LOOP
 # =====================
@@ -2616,7 +2731,7 @@ def run():
     startup_lines = [
         f"🤖 DONAL Signal Bot started",
         mode_line,
-
+        f"Strategy variant: {STRATEGY_MODE.upper()}",
         f"Symbols: {', '.join(VALID_SYMBOLS)}",
         f"TF: {TIMEFRAME}",
         f"HTF: {HTF_TIMEFRAME}",
@@ -2670,6 +2785,7 @@ def run():
 
     save_state(state)
     notify_event("🛑 DONAL Signal Bot berhenti/shutdown.")
+
 
 if __name__ == "__main__":
     try:
