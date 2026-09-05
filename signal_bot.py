@@ -1595,6 +1595,20 @@ def mark_protection_unknown(state, symbol, reason):
     notify_error(f"{symbol}: PROTECTION UNKNOWN: {reason}. Tidak ada blind retry/duplicate SELL.")
 
 
+def reprice_tp_if_crossed(symbol, tp, sl):
+    """Re-price sekali kalau TP ter-crossed karena harga pump cepat setelah fill."""
+    bid, ask = get_best_bid_ask(symbol)
+    if bid <= 0 or ask <= 0:
+        raise OcoPreflightError("book kosong, re-price tidak mungkin")
+    if sl >= bid:
+        raise OcoPreflightError(f"SL {sl} ter-crossed terhadap bid {bid}; flatten lebih disiplin")
+    if tp > ask:
+        return tp, sl
+    new_tp = ask * (1 + OCO_REPRICE_BUFFER_PCT / 100.0)
+    if new_tp <= ask or new_tp <= sl:
+        raise OcoPreflightError("hasil re-price TP tidak valid")
+    return new_tp, sl
+
 def try_place_native_protection(state, symbol):
     """
     Create/reconcile exactly one native OCO. The OCO intent is persisted before
