@@ -150,6 +150,7 @@ RISK_OVERSHOOT_ACTION = os.getenv("RISK_OVERSHOOT_ACTION", "reduce").strip().low
 # bot otomatis fallback ke polling-based SL/TP (mekanisme lama) supaya posisi
 # tidak pernah dibiarkan tanpa proteksi sama sekali.
 USE_NATIVE_OCO_SLTP = env_bool("USE_NATIVE_OCO_SLTP", True)
+OCO_REPRICE_BUFFER_PCT = env_float("OCO_REPRICE_BUFFER_PCT", 0.15)
 
 # --- Break-Even (BE) Protection ---
 USE_BREAK_EVEN = env_bool("USE_BREAK_EVEN", True)
@@ -1738,6 +1739,47 @@ def try_place_native_protection(state, symbol):
         # safely abandon the intent and flatten the just-opened position instead
         # of leaving it naked. This is NOT used when lookup itself is UNKNOWN.
         if oco_lookup_status == "NOT_FOUND" and isinstance(e, (OcoPreflightError, ccxt.InvalidOrder)):
+            # --- SMART RE-PRICE 1x: kalau TP ter-crossed karena harga pump ---
+            if not intent.get("repriced"):
+                intent["repriced"] = True
+                new_list_id = None
+                try:
+                    new_tp, new_sl = reprice_tp_if_crossed(symbol, tp, sl)
+                    new_tp_p = float(exchange.price_to_precision(symbol, new_tp))
+                    new_sl_p = float(exchange.price_to_precision(symbol, new_sl))
+                    pos["tp"] = new_tp_p
+                    pos["sl"] = new_sl_p
+                    save_state(state)
+                    new_list_id = _client_order_id("DONALO", symbol, f"{pos.get('entry_client_order_id')}|reprice|{int(time.time()*1000)}")
+                    oco = place_oco_exit(symbol, qty_p, new_tp_p, new_sl_p, new_list_id)
+                    _apply_oco_to_position(pos, oco)
+                    intents.pop(symbol, None)
+                    save_state(state)
+                    notify_event(
+                        f"🛡️ OCO RE-PRICED AKTIF {symbol} [{TRADING_MODE.upper()}]\n"
+                        f"Harga lompat melewati TP lama; proteksi disesuaikan sekali.\n"
+                        f"TP baru: {fmt(new_tp_p)} | SL: {fmt(new_sl_p)}\n"
+                        f"Order List ID: {oco['order_list_id']}"
+                    )
+                    return
+                except Exception as re_err:
+                    re_status = "NOT_FOUND"
+                    if new_list_id is not None:
+                        re_status, re_oco = lookup_oco_by_client_id(symbol, new_list_id)
+                        if re_oco:
+                            order_list_id, tp_id, sl_id = _extract_oco_child_ids(symbol, re_oco, intent)
+                            if order_list_id and tp_id and sl_id:
+                                _apply_oco_to_position(pos, {
+                                    "order_list_id": order_list_id, "tp_order_id": tp_id, "sl_order_id": sl_id,
+                                    "list_client_order_id": new_list_id,
+                                })
+                                intents.pop(symbol, None)
+                                save_state(state)
+                                return
+                    if re_status == "UNKNOWN":
+                        mark_protection_unknown(state, symbol, f"re-price OCO ambigu: {re_err}")
+                        return
+                    log.warning(f"{symbol}: re-price gagal ({re_err}); lanjut emergency exit.")
             intents.pop(symbol, None)
             pos["status"] = "open"
             pos["protection_reconciliation_required"] = False
