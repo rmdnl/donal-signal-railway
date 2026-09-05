@@ -190,23 +190,6 @@ _telegram_warned = False
 _notify_last_time = {}
 NOTIFY_COOLDOWN_SEC = 300  # 5 menit cooldown buat notifikasi yang sama
 
-def notify_throttled(key, message, is_error=False):
-    """Kirim notifikasi dengan cooldown biar gak spam."""
-    global _notify_last_time
-    now = time.time()
-    last = _notify_last_time.get(key, 0)
-    
-    if now - last < NOTIFY_COOLDOWN_SEC:
-        log.info(f"[throttled] {key}: {message[:80]}...")
-        return False
-    
-    _notify_last_time[key] = now
-    
-    if is_error:
-        notify_error(message)
-    else:
-        notify_event(message)
-    return True
 
 
 
