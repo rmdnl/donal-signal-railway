@@ -544,15 +544,6 @@ def rsi(close, length):
         out = 100 - (100 / (1 + rs))
     return out
 
-def stochastic_rsi(close, length=14, k_smooth=3, d_smooth=3):
-    rsi_vals = rsi(close, length)
-    lo = rsi_vals.rolling(length).min()
-    hi = rsi_vals.rolling(length).max()
-    stoch = 100 * (rsi_vals - lo) / (hi - lo).replace(0, np.nan)
-    k = stoch.rolling(k_smooth).mean()
-    d = k.rolling(d_smooth).mean()
-    return k, d
-
 def atr(df, length):
     high = df["high"]
     low = df["low"]
