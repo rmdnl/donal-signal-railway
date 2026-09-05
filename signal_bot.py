@@ -667,10 +667,7 @@ def get_htf_bull_trend(symbol):
     if pd.isna(htf["ema20"]) or pd.isna(htf["ema60"]) or pd.isna(htf["ema13"]) or pd.isna(htf["ema34"]) or pd.isna(htf["rsi14"]):
         return None
 
-    if STRATEGY_MODE == "pullback":
-        bull_trend = bool(htf["ema13"] > htf["ema34"] and htf["rsi14"] > 50)
-    else:
-        bull_trend = bool(htf["ema20"] > htf["ema60"] and htf["rsi14"] > 50)
+    bull_trend = bool(htf["ema20"] > htf["ema60"] and htf["rsi14"] > 50)
     bar_ts = int(htf["ts"])
     # Valid until the NEXT HTF candle closes (current bar closes at bar_ts+tf_ms,
     # the one after that at bar_ts+2*tf_ms -- that's when a fresher value exists).
@@ -697,11 +694,6 @@ def calculate_signal(symbol):
         df1h["adx"] = adx(df1h, ADX_LENGTH)
     df1h["volume_ma"] = df1h["volume"].rolling(VOLUME_MA_LENGTH).mean()
     df1h["atr_ma"] = df1h["atr14"].rolling(ATR_MA_LENGTH).mean()
-    if STRATEGY_MODE == "pullback":
-        stoch_k, stoch_d = stochastic_rsi(df1h["close"], STOCH_RSI_LENGTH)
-        df1h["stoch_k"] = stoch_k
-        df1h["stoch_d"] = stoch_d
-
     bull_trend = get_htf_bull_trend(symbol)
     if bull_trend is None:
         log.info(f"{symbol}: data HTF belum cukup.")
@@ -722,9 +714,6 @@ def calculate_signal(symbol):
         required.append(row["adx"])
     if USE_VOL_SCALED_SLTP:
         required.append(row["atr_ma"])
-    if STRATEGY_MODE == "pullback":
-        required.append(row["stoch_k"])
-        required.append(row["stoch_d"])
     if any(pd.isna(x) for x in required):
         log.info(f"{symbol}: indikator masih NaN.")
         return None
@@ -734,25 +723,14 @@ def calculate_signal(symbol):
 
     last_pivot_high, last_pivot_low = find_last_pivots(df1h, SR_LEFT_BARS, SR_RIGHT_BARS)
 
-    if STRATEGY_MODE == "pullback":
-        # Pullback: StochRSI cross-up keluar dari oversold = trigger
-        prev_k = float(df1h["stoch_k"].iloc[-2])
-        prev_d = float(df1h["stoch_d"].iloc[-2])
-        cross_up = bool(prev_k <= prev_d and float(row["stoch_k"]) > float(row["stoch_d"]))
-        was_oversold = bool(prev_k < STOCH_RSI_OS)
-        recent_low = float(df1h["low"].iloc[-10:].min())
-        higher_low_ok = (last_pivot_low is None) or (recent_low >= last_pivot_low * 0.995)
-        pb_vol_ok = (not USE_VOLUME_FILTER) or bool(float(row["volume"]) > float(df1h["volume"].iloc[-2]))
-        buy_trigger = bool(cross_up and was_oversold)
-    else:
-        # breakoutTrigger di Pine: close > ema20 AND rsi14 > rsiEntryLv AND close > hhN
-        higher_low_ok = True
-        pb_vol_ok = True
-        buy_trigger = bool(
-            close > row["ema20"]
-            and row["rsi14"] > RSI_ENTRY
-            and close > row["hh20_prev"]
-        )
+    # breakoutTrigger di Pine: close > ema20 AND rsi14 > rsiEntryLv AND close > hhN
+    higher_low_ok = True
+    pb_vol_ok = True
+    buy_trigger = bool(
+    close > row["ema20"]
+    and row["rsi14"] > RSI_ENTRY
+    and close > row["hh20_prev"]
+    )
 
     room_to_resistance = None
     if last_pivot_high is not None and last_pivot_high > close:
@@ -789,10 +767,7 @@ def calculate_signal(symbol):
             sl_mult = SL_MULT * vol_scale
             tp_mult = TP_MULT * vol_scale
 
-    if STRATEGY_MODE == "pullback":
-        buy_signal = bool(bull_trend and buy_trigger and higher_low_ok and pb_vol_ok and session_ok and adx_ok)
-    else:
-        buy_signal = bool(bull_trend and buy_trigger and res_room_ok and volume_ok and session_ok and adx_ok)
+    buy_signal = bool(bull_trend and buy_trigger and res_room_ok and volume_ok and session_ok and adx_ok)
 
     exit_trend = bool(close < row["ema20"] or row["rsi14"] < RSI_EXIT)
 
