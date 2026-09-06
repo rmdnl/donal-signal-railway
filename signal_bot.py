@@ -1208,7 +1208,7 @@ def calculate_position_size(state, symbol, entry_price, sl_price):
         return None
 
         # [NEW] Cap max posisi berdasarkan MAX_POSITION_PCT (safety net)
-    max_qty_by_pct = (equity_total * MAX_POSITION_PCT / 100.0) / entry if entry > 0 else qty
+    max_qty_by_pct = (equity * MAX_POSITION_PCT / 100.0) / entry_price if entry_price > 0 else qty
     if qty > max_qty_by_pct:
         log.info(f"{symbol}: qty capped {fmt(qty)} -> {fmt(max_qty_by_pct)} (MAX_POSITION_PCT={MAX_POSITION_PCT}%)")
         qty = max_qty_by_pct
