@@ -232,6 +232,7 @@ def fetch_ohlcv(symbol, timeframe="1h", limit=72):
         return []
 
 
+@st.cache_data(ttl=30)
 def fetch_balance():
     if TRADING_MODE not in {"live", "testnet"}:
         return float(os.getenv("VIRTUAL_BALANCE", "1000")), "VIRTUAL"
@@ -389,8 +390,8 @@ def terminal_chart(df, symbol="", height=470):
         buy_times = []
         buy_prices = []
         for t in sym_history[-10:]:  # Last 10 trades
-            entry_ts = t.get("entry_ts")
-            if entry_ts:
+            entry_ts = t.get("entry_ts") or 0
+            if entry_ts and entry_ts > 0:
                 buy_times.append(pd.to_datetime(entry_ts, unit="ms"))
                 buy_prices.append(float(t.get("entry", 0)))
         

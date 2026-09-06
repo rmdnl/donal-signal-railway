@@ -535,6 +535,7 @@ def save_trade_history(symbol, pos, exit_price, reason, pnl_quote_gross=None, pn
         "pnl_pct_net": round(pnl_pct_net, 4),
         "pnl_pct": round(pnl_pct_net, 4),  # backward-compatible alias = NET
         "reason": reason,
+        "entry_ts": int(pos.get("created_ts") or pos.get("entry_bar_ts") or 0),
         "exit_ts": int(time.time() * 1000),
     })
     history = history[-100:]
