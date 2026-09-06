@@ -117,18 +117,18 @@ def get_exchange():
 
 
 def calculate_signal_strength(symbol, ex):
-    """Hitung skor sinyal 0-100% berdasarkan kondisi Pine Script."""
+    """Hitung skor sinyal 0-100% berdasarkan 7 kondisi Pine Script DONAL."""
     try:
-        # Fetch data 1H (cukup buat hitung indikator)
+        import numpy as np
+        
+        # Fetch data 1H
         ohlcv = ex.fetch_ohlcv(symbol, "1h", limit=100)
         if len(ohlcv) < 60:
             return 0, "DATA KURANG"
         
-        import pandas as pd
-        import numpy as np
         df = pd.DataFrame(ohlcv, columns=["ts", "o", "h", "l", "c", "v"])
         
-        # Indikator dasar (match Pine)
+        # EMA 20/60
         df["ema20"] = df["c"].ewm(span=20, adjust=False).mean()
         df["ema60"] = df["c"].ewm(span=60, adjust=False).mean()
         
@@ -143,93 +143,114 @@ def calculate_signal_strength(symbol, ex):
         tr = pd.concat([df["h"]-df["l"], (df["h"]-df["c"].shift(1)).abs(), (df["l"]-df["c"].shift(1)).abs()], axis=1).max(axis=1)
         df["atr"] = tr.ewm(alpha=1/14, adjust=False).mean()
         
-        # ADX 14 (match Pine ta.dmi(14, 14))
-        plus_dm = df["h"].diff()
-        minus_dm = -df["l"].diff()
-        plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
-        minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
-        atr_w = tr.ewm(alpha=1/14, adjust=False).mean()
-        plus_di = 100 * (plus_dm.ewm(alpha=1/14, adjust=False).mean() / atr_w.replace(0, 1e-10))
-        minus_di = 100 * (minus_dm.ewm(alpha=1/14, adjust=False).mean() / atr_w.replace(0, 1e-10))
-        dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, 1e-10))
-        df["adx"] = dx.ewm(alpha=1/14, adjust=False).mean()
-        
         # Volume MA
         df["vol_ma"] = df["v"].rolling(20).mean()
         
-        # HH20 (highest high 20 bars, shifted 1)
+        # HH20 (shifted 1)
         df["hh20"] = df["h"].rolling(20).max().shift(1)
         
-        # Last Pivot High (match Pine ta.pivothigh(high, 10, 10))
-        left_b, right_b = 10, 10
+        # ADX (match Pine ta.dmi)
+        up_move = df["h"] - df["h"].shift(1)
+        down_move = df["l"].shift(1) - df["l"]
+        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+        plus_dm_rma = pd.Series(plus_dm, index=df.index).ewm(alpha=1/14, adjust=False).mean()
+        minus_dm_rma = pd.Series(minus_dm, index=df.index).ewm(alpha=1/14, adjust=False).mean()
+        atr_rma = df["atr"]
+        plus_di = 100 * (plus_dm_rma / atr_rma.replace(0, np.nan))
+        minus_di = 100 * (minus_dm_rma / atr_rma.replace(0, np.nan))
+        dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
+        df["adx"] = dx.ewm(alpha=1/14, adjust=False).mean()
+        
+        # Pivot High (resistance) for ResRoom
+        highs = df["h"].values
+        lows = df["l"].values
+        n = len(df)
         last_pivot_high = None
-        for idx in range(left_b, len(df) - right_b):
-            window = df["h"].iloc[idx - left_b:idx + right_b + 1]
-            if df["h"].iloc[idx] == window.max():
-                last_pivot_high = float(df["h"].iloc[idx])
+        for i in range(n - 1 - 10, 10 - 1, -1):
+            window_h = highs[max(0, i-10):min(n, i+10+1)]
+            if len(window_h) > 0 and highs[i] == window_h.max():
+                last_pivot_high = float(highs[i])
+                break
+        
+        # HTF 4H trend (fetch actual 4H data, match Pine)
+        try:
+            ohlcv_4h = ex.fetch_ohlcv(symbol, "4h", limit=80)
+            if len(ohlcv_4h) >= 62:
+                df4h = pd.DataFrame(ohlcv_4h, columns=["ts", "o", "h", "l", "c", "v"])
+                htf_ema20 = df4h["c"].ewm(span=20, adjust=False).mean().iloc[-2]
+                htf_ema60 = df4h["c"].ewm(span=60, adjust=False).mean().iloc[-2]
+                delta4h = df4h["c"].diff()
+                gain4h = delta4h.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
+                loss4h = (-delta4h.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
+                rs4h = gain4h / loss4h
+                htf_rsi = (100 - (100 / (1 + rs4h))).iloc[-2]
+                htf_bull = bool(htf_ema20 > htf_ema60 and htf_rsi > 50)
+            else:
+                htf_bull = False
+        except Exception:
+            htf_bull = df["ema20"].iloc[-1] > df["ema60"].iloc[-1]
         
         row = df.iloc[-1]
-        prev_row = df.iloc[-2]
-        
         score = 0
         total_checks = 7
         details = []
         
-        # 1. HTF Trend Proxy (EMA20 > EMA60 di 1H sebagai proxy sederhana buat dashboard speed)
-        # Note: Dashboard gak fetch 4H biar cepet, jadi pake 1H trend sebagai indikator "siap"
-        if row["ema20"] > row["ema60"]:
+        # 1. HTF 4H Trend (actual, bukan proxy)
+        if htf_bull:
             score += 1
-            details.append("TREND✅")
+            details.append("4H\u2705")
         else:
-            details.append("TREND❌")
-            
+            details.append("4H\u274c")
+        
         # 2. Price > EMA20
         if row["c"] > row["ema20"]:
             score += 1
-            details.append("PRICE✅")
+            details.append("EMA\u2705")
         else:
-            details.append("PRICE❌")
-            
+            details.append("EMA\u274c")
+        
         # 3. RSI > 50
         if row["rsi"] > 50:
             score += 1
-            details.append("RSI✅")
+            details.append("RSI\u2705")
         else:
-            details.append("RSI❌")
-            
-        # 4. Volume > 1.5x MA (Pine default)
+            details.append("RSI\u274c")
+        
+        # 4. Volume > 1.5x MA
         if row["v"] > row["vol_ma"] * 1.5:
             score += 1
-            details.append("VOL✅")
+            details.append("VOL\u2705")
         else:
-            details.append("VOL❌")
-            
+            details.append("VOL\u274c")
+        
         # 5. Breakout HH20
         if row["c"] > row["hh20"]:
             score += 1
-            details.append("BO✅")
+            details.append("BO\u2705")
         else:
-            details.append("BO❌")
-            
-        # 6. ADX > 20 (match Pine adxOK)
+            details.append("BO\u274c")
+        
+        # 6. ADX > 20
         if row["adx"] > 20:
             score += 1
-            details.append("ADX✅")
+            details.append("ADX\u2705")
         else:
-            details.append("ADX❌")
-            
-        # 7. Resistance Room > 1.0 ATR (match Pine resRoomOK)
+            details.append("ADX\u274c")
+        
+        # 7. ResRoom > 1.0 ATR
         if last_pivot_high is None or last_pivot_high <= row["c"]:
-            score += 1
-            details.append("ROOM✅")
-        elif (last_pivot_high - row["c"]) > row["atr"] * 1.0:
-            score += 1
-            details.append("ROOM✅")
+            res_room_ok = True
         else:
-            details.append("ROOM❌")
-            
+            res_room_ok = (last_pivot_high - row["c"]) > 1.0 * row["atr"]
+        if res_room_ok:
+            score += 1
+            details.append("RES\u2705")
+        else:
+            details.append("RES\u274c")
+        
         pct = int((score / total_checks) * 100)
-        status = " | ".join(details)
+        status = " ".join(details)
         return pct, status
         
     except Exception as e:
