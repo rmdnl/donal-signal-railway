@@ -1950,21 +1950,37 @@ def place_exit_order(state, symbol, reason, price, qty_override=None):
         notify_error(f"{symbol}: qty exit menjadi 0 setelah precision, SELL dibatalkan.")
         return
 
-    # [FIX] Self-healing exit: clamp qty SELL ke free balance biar gak pernah
-    # gagal "insufficient balance" (fee/dust/rounding/testnet reset).
+    # [FIX V2] Self-healing exit: clamp qty SELL + robust dust handler
     _mkt = exchange.markets.get(symbol) or {}
     _lim = (_mkt.get("limits") or {}).get("amount") or {}
     min_amount = float(_lim.get("min") or 0.0)
+    _base = symbol.split("/")[0]
+    _free = qty_p  # fallback kalau fetch gagal
     try:
-        _base = symbol.split("/")[0]
         _free = float((exchange.fetch_balance().get("free") or {}).get(_base) or 0.0)
-        if _free < qty_p:
-            log.warning(f"{symbol}: qty SELL di-clamp {qty_p} -> {_free} (free balance).")
-            qty_p = float(exchange.amount_to_precision(symbol, _free))
     except Exception as e:
         log.warning(f"{symbol}: gagal fetch free balance pre-sell: {e}")
+        
+    # 1. Cek dust DULUAN: free balance aktual di bawah minimum order
+    if min_amount > 0 and 0 < _free < min_amount:
+        notify_error(f"{symbol}: free balance ({_free}) di bawah minimum order ({min_amount}). Posisi ditutup di state (dust).")
+        positions.pop(symbol, None)
+        state.setdefault("exit_intents", {}).pop(symbol, None)
+        save_state(state)
+        return
+        
+    # 2. Clamp qty_p ke free balance
+    if _free < qty_p:
+        log.warning(f"{symbol}: qty SELL di-clamp {qty_p} -> {_free} (free balance).")
+        try:
+            qty_p = float(exchange.amount_to_precision(symbol, _free))
+        except Exception as e:
+            log.warning(f"{symbol}: amount_to_precision gagal (dust/invalid): {e}. Force qty_p = 0.")
+            qty_p = 0.0
+            
+    # 3. Cek final qty_p
     if qty_p <= 0 or (min_amount > 0 and qty_p < min_amount):
-        notify_error(f"{symbol}: free balance tidak cukup buat SELL (dust/fee/reset). Posisi ditutup di state tanpa order biar gak spam error.")
+        notify_error(f"{symbol}: qty SELL jadi 0 atau di bawah minimum ({qty_p}). Posisi ditutup di state.")
         positions.pop(symbol, None)
         state.setdefault("exit_intents", {}).pop(symbol, None)
         save_state(state)
