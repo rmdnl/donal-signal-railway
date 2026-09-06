@@ -1166,10 +1166,10 @@ def calculate_position_size(state, symbol, entry_price, sl_price):
     
     # [FIX] Validasi ulang min_cost/min_amount SETELAH cap
     cost_after_cap = qty * entry_price
-    if cost_after_cap < min_cost:
+    if min_cost and cost_after_cap < min_cost:
         log.warning(f"{symbol}: qty {fmt(qty)} setelah cap di bawah min_cost {min_cost}, skip entry")
         return 0.0
-    if qty < min_amount:
+    if min_amount and qty < min_amount:
         log.warning(f"{symbol}: qty {fmt(qty)} setelah cap di bawah min_amount {min_amount}, skip entry")
         return 0.0
     
