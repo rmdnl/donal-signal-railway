@@ -366,7 +366,10 @@ if nav in {"OVERVIEW","MARKET"}:
         
         # SIGNAL RADAR
         st.markdown('<div class="section-title">// SIGNAL RADAR · SIAP ENTRY?</div>', unsafe_allow_html=True)
-        radar_symbols = tuple(watch[:6])  # Scan max 6 symbol biar cepet
+        # [FIX] Scan semua symbol dari env SYMBOLS, bukan cuma yang ada di state
+        env_symbols = os.getenv("SYMBOLS", "BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT")
+        all_symbols = [s.strip() for s in env_symbols.split(",") if s.strip()]
+        radar_symbols = tuple(all_symbols[:8])  # Scan max 8 symbol dari config
         radar_data = scan_all_signals(radar_symbols)
         
         radar_html = '<div class="pane"><table class="terminal-table"><thead><tr><th>PAIR</th><th>SCORE</th><th>STATUS</th></tr></thead><tbody>'
