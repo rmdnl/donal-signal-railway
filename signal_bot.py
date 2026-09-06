@@ -1309,7 +1309,11 @@ def place_entry_order(state, symbol, signal_data, market_price):
                             _ok = True
                             break
                         elif _r.get('status') in ('canceled', 'rejected'):
-                            log.warning(f'{symbol}: LIMIT {_r.get("status")}, skip')
+                            if float(_r.get('filled') or 0.0) > 0:
+                                order = _r
+                                _ok = True
+                                break
+                            log.warning(f'{symbol}: LIMIT {_r.get("status")}, skip (no fill)')
                             intents.pop(symbol, None)
                             save_state(state)
                             return
@@ -1320,11 +1324,18 @@ def place_entry_order(state, symbol, signal_data, market_price):
                         exchange.cancel_order(order['id'], symbol)
                     except Exception:
                         pass
-                    log.warning(f'{symbol}: LIMIT TIMEOUT, skipped')
-                    notify_error(f'{symbol}: Limit entry timeout')
-                    intents.pop(symbol, None)
-                    save_state(state)
-                    return
+                    try:
+                        _final = exchange.fetch_order(order['id'], symbol)
+                    except Exception:
+                        _final = None
+                    if _final and float(_final.get('filled') or 0.0) > 0:
+                        order = _final
+                    else:
+                        log.warning(f'{symbol}: LIMIT TIMEOUT, skipped (no fill)')
+                        notify_error(f'{symbol}: Limit entry timeout')
+                        intents.pop(symbol, None)
+                        save_state(state)
+                        return
             else:
                 order = exchange.create_market_buy_order(symbol, qty, {'newClientOrderId': client_id})
         except Exception as e:
