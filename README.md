@@ -248,3 +248,76 @@ _"In crypto we trust, in DONAL we believe."_ 🚀
 **WAGMI** 🤝
 
 _Dibuat dengan 💻 dari VPS, dijaga sama AI yang gak mau lu rungkad._
+
+---
+
+## 🗣️ Testimoni Fiktif (Tapi Relate)
+
+> ⭐⭐⭐⭐⭐
+> "Dulu gw nyangkut di pucuk 3 bulan. Sekarang bot yang nentuin SL, jadi gw cuma nyangkut di perasaan."
+> — **Bang Rungkad**, 27, mantan holder pucuk 🗿
+
+> ⭐⭐⭐⭐⭐
+> "Bot-nya bilang skip. Gw maksa entry manual. Gw yang rugi. Ternyata yang perlu di-upgrade bukan bot-nya, tapi gw."
+> — **Kak Delulu**, 24, korban FOMO berulang 😭
+
+> ⭐⭐⭐⭐⭐
+> "Testnet 2 minggu profit. Pindah live rugi. Ternyata masalahnya di mental, bukan di bot."
+> — **Mas Menyala**, 30, aura -1000 🔥
+
+> ⭐⭐⭐⭐⭐
+> "Gw clone repo ini, temen-temen gw juga clone. Kita semua profit. Bot-nya goated af."
+> — **DONAL**, trader ganteng yang udah WAGMI 💋
+
+> ⭐⭐⭐
+> "Kurang satu bintang soalnya bot-nya gak bisa diajak healing."
+> — **Bestie**, umur rahasia 💅
+
+---
+
+## ❓ FAQ (Frequently Asked Questions oleh Orang Delulu)
+
+**Q: Bot ini bisa bikin kaya?**
+A: Dia bikin disiplin. Kaya itu efek samping. Yang pasti lu gak FOMO sendirian.
+
+**Q: Bot ini gak bakal rugi?**
+A: Bakal. Dia bot, bukan dukun. Kalau ada yang janji "pasti cuan", tutup repo ini dan lapor polisi.
+
+**Q: Kok gak ada sinyal-sinyal?**
+A: Market lagi jelek dan bot pemilih. Lu juga harusnya pemilih. Cek Signal Radar di dashboard — kalau skor semua <60%, ya emang belum waktunya.
+
+**Q: Boleh pakai uang pinjol?**
+A: 🗿 Tidak. Jangan. Ini satu-satunya bagian yang gak bercanda.
+
+**Q: Bot-nya bisa jadi pacar?**
+A: Dia konsisten, fast response, gak ghosting. Tapi gak bisa diajak makan seblak. Jadi tidak.
+
+**Q: Gw clone repo ini, boleh pake API key yang sama bareng temen?**
+A: **JANGAN.** Satu orang salah klik, OCO kalian tabrakan. Bikin key masing-masing.
+
+**Q: Kenapa session filter dibuang?**
+A: Pine Script asli gak pake filter jam. Market crypto 24/7. Bot scan nonstop biar gak ketinggalan setup di jam "sepi" yang ternyata malah pump.
+
+---
+
+## 🧠 Quotes of the Repo
+
+> _"Entry tanpa plan = sedekah ke whale."_
+
+> _"SL itu asuransi, bukan penghinaan."_
+
+> _"Market gak peduli lu butuh uang buat self reward."_
+
+> _"Kalau bot bilang skip, ya skip. Lu bukan main character di market."_
+
+> _"Rungkad itu canon event. Rungkad berulang itu pilihan."_
+
+> _"Discipline > Emotion. Protect Capital First."_
+
+---
+
+_"In crypto we trust, in DONAL we believe."_ 🚀
+
+**WAGMI** 🤝
+
+_Dibuat dengan 💻 dari VPS, dijaga sama AI yang gak mau lu rungkad._
