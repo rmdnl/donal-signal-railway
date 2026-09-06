@@ -287,7 +287,7 @@ def make_candles(raw):
         return None
     df = pd.DataFrame(raw, columns=["ts", "open", "high", "low", "close", "volume"])
     df["time"] = pd.to_datetime(df["ts"], unit="ms")
-    df["ema20"] = df["close"].ewm(alpha=1/20, adjust=False).mean()  # [FIX #8] Match Pine ta.ema(close, 20)
+    df["ema20"] = df["close"].ewm(span=20, adjust=False).mean()  # [FIX #8] Match Pine ta.ema(close, 20)
     df["ema60"] = df["close"].ewm(span=60, adjust=False).mean()
     return df
 
