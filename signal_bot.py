@@ -1340,6 +1340,46 @@ def place_entry_order(state, symbol, signal_data, market_price):
         intents[symbol]["state"] = "submitted"
         save_state(state)
         try:
+            # [FIX] Limit or Market entry based on USE_LIMIT_ENTRY config
+        if USE_LIMIT_ENTRY:
+            limit_price = float(signal_data.get("close", 0.0)) * (1 + LIMIT_ENTRY_BUFFER_PCT / 100.0)
+            limit_price = float(exchange.price_to_precision(symbol, limit_price))
+            log.info(f"{symbol}: LIMIT BUY @ {fmt(limit_price)} (buffer {LIMIT_ENTRY_BUFFER_PCT}%)")
+            order = exchange.create_limit_buy_order(symbol, qty, limit_price, {"newClientOrderId": client_id, "timeInForce": "GTC"})
+            # Poll for fill with timeout
+            import time as _t
+            _start = _t.time()
+            _filled = False
+            while _t.time() - _start < LIMIT_ENTRY_TIMEOUT_SEC and RUNNING:
+                _t.sleep(3)
+                try:
+                    _refreshed = exchange.fetch_order(order["id"], symbol)
+                    _status = _refreshed.get("status", "")
+                    if _status == "closed":
+                        order = _refreshed
+                        _avg = float(_refreshed.get("average") or limit_price)
+                        log.info(f"{symbol}: LIMIT FILLED @ {fmt(_avg)}")
+                        _filled = True
+                        break
+                    elif _status in ("canceled", "rejected"):
+                        log.warning(f"{symbol}: LIMIT {status}, skip entry")
+                        intents.pop(symbol, None)
+                        save_state(state)
+                        return
+                except Exception as e:
+                    log.warning(f"{symbol}: fetch limit order error: {e}")
+            if not _filled:
+                # Timeout — cancel and skip
+                try:
+                    exchange.cancel_order(order["id"], symbol)
+                except Exception:
+                    pass
+                log.warning(f"{symbol}: LIMIT TIMEOUT ({LIMIT_ENTRY_TIMEOUT_SEC}s), entry skipped")
+                notify_error(f"{symbol}: Limit entry timeout, sinyal dilewatkan")
+                intents.pop(symbol, None)
+                save_state(state)
+                return
+        else:
             order = exchange.create_market_buy_order(symbol, qty, {"newClientOrderId": client_id})
         except Exception as e:
             # A timeout is ambiguous. Reconcile by client ID before deciding that
