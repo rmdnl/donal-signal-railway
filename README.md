@@ -232,25 +232,6 @@ Tapi jangan dijual ulang jadi "robot premium VIP". Itu cringe. 💀
 
 ---
 
-## 🧠 Quotes of the Repo
-
-> _"Entry tanpa plan = sedekah ke whale."_
-> _"SL itu asuransi, bukan penghinaan."_
-> _"Market gak peduli lu butuh uang buat self reward."_
-> _"Kalau bot bilang skip, ya skip. Lu bukan main character di market."_
-> _"Rungkad itu canon event. Rungkad berulang itu pilihan."_
-> _"Discipline > Emotion. Protect Capital First."_
-
----
-
-_"In crypto we trust, in DONAL we believe."_ 🚀
-
-**WAGMI** 🤝
-
-_Dibuat dengan 💻 dari VPS, dijaga sama AI yang gak mau lu rungkad._
-
----
-
 ## 🗣️ Testimoni Fiktif (Tapi Relate)
 
 > ⭐⭐⭐⭐⭐
