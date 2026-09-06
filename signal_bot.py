@@ -119,9 +119,8 @@ BINANCE_LIVE_API_SECRET = os.getenv("BINANCE_LIVE_API_SECRET", "").strip()
 
 QUOTE_ASSET = os.getenv("QUOTE_ASSET", "USDT").strip().upper()
 
-# Risk-based position sizing: qty = (equity * RISK_PCT_PER_TRADE%) / (entry - SL)
-RISK_PCT_PER_TRADE = env_float("RISK_PCT_PER_TRADE", 1.0)
-MAX_POSITION_PCT = env_float("MAX_POSITION_PCT", 25.0)  # [NEW] Cap max posisi % dari equity (safety net vs Pine default 20%)
+# Position sizing match Pine: percent_of_equity=20 (20% dari equity per posisi).
+PCT_OF_EQUITY = env_float("PCT_OF_EQUITY", 20.0)  # match Pine percent_of_equity=20
 
 # Entry & exit (SL/TP/trend exit) pakai MARKET order -- prioritas kepastian eksekusi
 # di atas presisi harga. Karena market order langsung fill (bukan menunggu seperti
@@ -137,7 +136,7 @@ MAX_ENTRY_SLIPPAGE_PCT = env_float("MAX_ENTRY_SLIPPAGE_PCT", 0.2)
 USE_LIMIT_ENTRY = env_bool("USE_LIMIT_ENTRY", False)  # [NEW] Pakai limit order instead of market (lebih presisi, match Pine process_orders_on_close)
 LIMIT_ENTRY_BUFFER_PCT = env_float("LIMIT_ENTRY_BUFFER_PCT", 0.1)  # [NEW] Limit price = close + buffer%
 LIMIT_ENTRY_TIMEOUT_SEC = env_int("LIMIT_ENTRY_TIMEOUT_SEC", 120)  # [NEW] Cancel kalau gak fill dalam X detik
-MAX_ACTUAL_RISK_PCT = env_float("MAX_ACTUAL_RISK_PCT", RISK_PCT_PER_TRADE * 1.25)
+MAX_ACTUAL_RISK_PCT = env_float("MAX_ACTUAL_RISK_PCT", 1.25)
 RISK_OVERSHOOT_ACTION = os.getenv("RISK_OVERSHOOT_ACTION", "reduce").strip().lower()  # reduce | exit | hold
 
 # Native Binance OCO (One-Cancels-the-Other): SL/TP disimpan DI EXCHANGE, tetap
@@ -1113,66 +1112,61 @@ def compute_sl_tp(signal_data, entry):
     return sl, tp, sltp_note
 
 
-def calculate_position_size(state, symbol, entry_price, sl_price):
+def calculate_position_size(state, symbol, entry_price, sl_price=None):
     """
-    Risk-based sizing: qty = (equity_total * RISK_PCT_PER_TRADE%) / (entry - SL).
-    Dibatasi presisi & minimum order exchange. Return None kalau tidak valid/tidak cukup.
+    Position sizing match Pine Script:
+    default_qty_type=strategy.percent_of_equity, default_qty_value=20
+    -> qty = (equity * PCT_OF_EQUITY%) / entry_price.
 
-    [PATCH AUDIT] equity dihitung dengan get_total_equity() (saldo quote + nilai
-    posisi bot yang sedang terbuka), bukan get_equity() saja, supaya risk % per
-    trade konsisten terhadap total modal walau sedang ada posisi lain berjalan.
+    Guard presisi & minimum order exchange tetap dipertahankan
+    (aturan Binance, bukan strategi). Return None kalau tidak valid.
     """
-    if entry_price <= 0 or sl_price <= 0 or sl_price >= entry_price:
-        log.warning(f"{symbol}: entry/SL tidak valid untuk sizing (entry={entry_price}, sl={sl_price}).")
+    if entry_price <= 0:
+        log.warning(f"{symbol}: entry tidak valid untuk sizing (entry={entry_price}).")
         return None
 
     equity = get_total_equity(state, QUOTE_ASSET)
-    available_quote = get_available_quote(QUOTE_ASSET)
-    if equity <= 0 or available_quote <= 0:
-        log.warning(f"{symbol}: saldo {QUOTE_ASSET} 0 atau gagal diambil, skip sizing.")
+    if equity <= 0:
+        log.warning(f"{symbol}: equity tidak valid untuk sizing ({equity}).")
         return None
 
-    risk_amount = equity * RISK_PCT_PER_TRADE / 100.0
-    price_risk = entry_price - sl_price
-    qty = risk_amount / price_risk
+    qty = (equity * (PCT_OF_EQUITY / 100.0)) / entry_price
 
-    # Jangan pernah coba belanja lebih dari saldo yang ada, walau risk_amount kecil
-    # (bisa terjadi kalau SL sangat dekat ke entry -> qty jadi besar sekali).
-    max_affordable_qty = available_quote / (entry_price * (1.0 + TAKER_FEE_PCT / 100.0))
-    if qty > max_affordable_qty:
-        qty = max_affordable_qty
+    # Execution safety: jangan belanja melebihi saldo quote yang benar-benar free.
+    try:
+        available_quote = get_available_quote(QUOTE_ASSET)
+        max_qty_by_cash = (available_quote * 0.999) / entry_price
+        if max_qty_by_cash <= 0:
+            log.warning(f"{symbol}: saldo free {QUOTE_ASSET} tidak cukup, skip entry.")
+            return None
+        if qty > max_qty_by_cash:
+            log.info(f"{symbol}: qty di-clamp ke saldo free ({available_quote:.2f} {QUOTE_ASSET}).")
+            qty = max_qty_by_cash
+    except Exception as e:
+        log.warning(f"{symbol}: gagal cek saldo free: {e}")
 
-    market = exchange.markets.get(symbol, {}) if exchange.markets else {}
-    limits = market.get("limits", {}) if market else {}
-    min_amount = (limits.get("amount") or {}).get("min")
-    min_cost = (limits.get("cost") or {}).get("min")
+    try:
+        qty = float(exchange.amount_to_precision(symbol, qty))
+    except Exception as e:
+        log.warning(f"{symbol}: gagal apply precision qty: {e}")
 
+    if qty <= 0:
+        log.warning(f"{symbol}: qty menjadi 0 setelah precision, skip.")
+        return None
+
+    # Aturan exchange: minimum notional & minimum amount (truthy guard, None-safe).
+    mkt = exchange.markets.get(symbol) or {}
+    limits = mkt.get("limits") or {}
+    min_cost = float((limits.get("cost") or {}).get("min") or 0.0)
+    min_amount = float((limits.get("amount") or {}).get("min") or 0.0)
     notional = qty * entry_price
     if min_cost and notional < min_cost:
-        log.warning(
-            f"{symbol}: notional order ({notional:.4f} {QUOTE_ASSET}) < minNotional exchange "
-            f"({min_cost}). Naikkan RISK_PCT_PER_TRADE atau saldo, skip entry."
-        )
+        log.warning(f"{symbol}: notional {notional:.2f} < min_cost {min_cost}, skip entry.")
         return None
     if min_amount and qty < min_amount:
-        log.warning(f"{symbol}: qty ({qty}) < minQty exchange ({min_amount}), skip entry.")
+        log.warning(f"{symbol}: qty {qty} < min_amount {min_amount}, skip entry.")
         return None
 
-        # [FIX] Cap max posisi SEBELUM return, validasi ulang min setelah cap
-    max_qty_by_pct = (equity * MAX_POSITION_PCT / 100.0) / entry_price if entry_price > 0 else qty
-    if qty > max_qty_by_pct:
-        log.info(f"{symbol}: qty capped {fmt(qty)} -> {fmt(max_qty_by_pct)} (MAX_POSITION_PCT={MAX_POSITION_PCT}%)")
-        qty = max_qty_by_pct
-    
-    # [FIX] Validasi ulang min_cost/min_amount SETELAH cap
-    cost_after_cap = qty * entry_price
-    if min_cost and cost_after_cap < min_cost:
-        log.warning(f"{symbol}: qty {fmt(qty)} setelah cap di bawah min_cost {min_cost}, skip entry")
-        return 0.0
-    if min_amount and qty < min_amount:
-        log.warning(f"{symbol}: qty {fmt(qty)} setelah cap di bawah min_amount {min_amount}, skip entry")
-        return 0.0
-    
     return qty
 
 
@@ -2828,7 +2822,7 @@ def run():
             f"max {MAX_ENTRY_SLIPPAGE_PCT}%" if MAX_ENTRY_SLIPPAGE_PCT > 0 else "nonaktif"
         )
         startup_lines += [
-            f"Risk per trade: {RISK_PCT_PER_TRADE}% dari saldo {QUOTE_ASSET}",
+        f"Position size: {PCT_OF_EQUITY}% of equity (match Pine)",
             f"Entry: MARKET (slippage guard: {slippage_guard_note})",
             f"Exit: MARKET (SL/TP/trend exit)",
             f"Native OCO SL/TP: {USE_NATIVE_OCO_SLTP} (UNKNOWN = no blind retry)",
