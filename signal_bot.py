@@ -1207,11 +1207,20 @@ def calculate_position_size(state, symbol, entry_price, sl_price):
         log.warning(f"{symbol}: qty ({qty}) < minQty exchange ({min_amount}), skip entry.")
         return None
 
-        # [NEW] Cap max posisi berdasarkan MAX_POSITION_PCT (safety net)
+        # [FIX] Cap max posisi SEBELUM return, validasi ulang min setelah cap
     max_qty_by_pct = (equity * MAX_POSITION_PCT / 100.0) / entry_price if entry_price > 0 else qty
     if qty > max_qty_by_pct:
         log.info(f"{symbol}: qty capped {fmt(qty)} -> {fmt(max_qty_by_pct)} (MAX_POSITION_PCT={MAX_POSITION_PCT}%)")
         qty = max_qty_by_pct
+    
+    # [FIX] Validasi ulang min_cost/min_amount SETELAH cap
+    cost_after_cap = qty * entry_price
+    if cost_after_cap < min_cost:
+        log.warning(f"{symbol}: qty {fmt(qty)} setelah cap di bawah min_cost {min_cost}, skip entry")
+        return 0.0
+    if qty < min_amount:
+        log.warning(f"{symbol}: qty {fmt(qty)} setelah cap di bawah min_amount {min_amount}, skip entry")
+        return 0.0
     
     return qty
 
