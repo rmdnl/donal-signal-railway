@@ -145,7 +145,6 @@ RISK_OVERSHOOT_ACTION = os.getenv("RISK_OVERSHOOT_ACTION", "reduce").strip().low
 # bot otomatis fallback ke polling-based SL/TP (mekanisme lama) supaya posisi
 # tidak pernah dibiarkan tanpa proteksi sama sekali.
 USE_NATIVE_OCO_SLTP = env_bool("USE_NATIVE_OCO_SLTP", True)
-OCO_REPRICE_BUFFER_PCT = env_float("OCO_REPRICE_BUFFER_PCT", 0.15)
 
 # --- Break-Even (BE) Protection ---
 USE_BREAK_EVEN = env_bool("USE_BREAK_EVEN", True)
@@ -1701,20 +1700,6 @@ def mark_protection_unknown(state, symbol, reason):
     notify_error(f"{symbol}: PROTECTION UNKNOWN: {reason}. Tidak ada blind retry/duplicate SELL.")
 
 
-
-def reprice_tp_if_crossed(symbol, tp, sl):
-    """Re-price sekali kalau TP ter-crossed karena harga pump cepat setelah fill."""
-    bid, ask = get_best_bid_ask(symbol)
-    if bid <= 0 or ask <= 0:
-        raise OcoPreflightError("book kosong, re-price tidak mungkin")
-    if sl >= bid:
-        raise OcoPreflightError(f"SL {sl} ter-crossed terhadap bid {bid}; flatten lebih disiplin")
-    if tp > ask:
-        return tp, sl
-    new_tp = ask * (1 + OCO_REPRICE_BUFFER_PCT / 100.0)
-    if new_tp <= ask or new_tp <= sl:
-        raise OcoPreflightError("hasil re-price TP tidak valid")
-    return new_tp, sl
 
 def try_place_native_protection(state, symbol):
     """
