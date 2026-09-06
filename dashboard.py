@@ -217,6 +217,7 @@ for symbol, pos in positions.items():
         open_value += live * qty
     open_rows.append({"PAIR":symbol,"STATUS":str(pos.get("status","open")).upper(),"ENTRY":fmt_price(entry),"LAST":fmt_price(live),"QTY":f"{qty:.6f}".rstrip("0").rstrip("."),"P&L":pnl,"P&L %":pnl_pct,"TP":fmt_price(pos.get("tp")),"SL":fmt_price(pos.get("sl"))})
 equity=balance+open_value
+unrealized_pct = (unrealized / equity * 100) if equity > 0 else 0.0
 realized=sum(float(t.get("pnl_net",t.get("pnl",0)) or 0) for t in history)
 wins=sum(1 for t in history if float(t.get("pnl_net",t.get("pnl",0)) or 0)>0)
 win_rate=wins/len(history)*100 if history else 0
