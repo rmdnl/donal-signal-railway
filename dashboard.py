@@ -291,14 +291,160 @@ def make_candles(raw):
     return df
 
 
-def terminal_chart(df, height=470):
+def terminal_chart(df, symbol="", height=470):
+    """Upgraded Plotly chart matching Pine Script DONAL 4H Trend 1H Breakout."""
+    import plotly.graph_objects as go
+    from datetime import timedelta
+    
     fig = go.Figure()
-    fig.add_trace(go.Candlestick(x=df["time"], open=df["open"], high=df["high"], low=df["low"], close=df["close"], name="OHLC", increasing_line_color="#79ddb1", decreasing_line_color="#df7777", increasing_fillcolor="#79ddb1", decreasing_fillcolor="#df7777"))
-    fig.add_trace(go.Scatter(x=df["time"], y=df["ema20"], mode="lines", name="EMA20", line=dict(color="#e6b85c", width=1.2)))
-    fig.add_trace(go.Scatter(x=df["time"], y=df["ema60"], mode="lines", name="EMA60", line=dict(color="#79cde0", width=1.2)))
-    fig.update_layout(height=height, margin=dict(l=4,r=4,t=8,b=4), paper_bgcolor="#0c1011", plot_bgcolor="#0c1011", font=dict(family="IBM Plex Mono", size=9, color="#8b9893"), hovermode="x unified", showlegend=True, legend=dict(orientation="h", y=1.02, x=0, font=dict(size=8)), xaxis_rangeslider_visible=False, dragmode="pan")
-    fig.update_xaxes(showgrid=True, gridcolor="#1b2326", linecolor="#293236", zeroline=False, rangeslider_visible=False)
-    fig.update_yaxes(showgrid=True, gridcolor="#1b2326", linecolor="#293236", zeroline=False, side="right")
+    
+    # 1) Candlestick OHLC
+    fig.add_trace(go.Candlestick(
+        x=df["time"], open=df["open"], high=df["high"], low=df["low"], close=df["close"],
+        name="OHLC",
+        increasing_line_color="#79ddb1", decreasing_line_color="#df7777",
+        increasing_fillcolor="#79ddb1", decreasing_fillcolor="#df7777"
+    ))
+    
+    # 2) EMA 20 (Orange - match Pine color.orange)
+    if "ema20" in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df["time"], y=df["ema20"], mode="lines", name="EMA20",
+            line=dict(color="#e6b85c", width=1.5)
+        ))
+    
+    # 3) EMA 60 (Blue - match Pine color.blue)
+    if "ema60" in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df["time"], y=df["ema60"], mode="lines", name="EMA60",
+            line=dict(color="#79cde0", width=1.5)
+        ))
+    
+    # 4) Background color for bull trend (match Pine bgcolor)
+    # Pine: bgcolor(okChart and bullTrend ? color.new(color.green, 90) : na)
+    if "ema20" in df.columns and "ema60" in df.columns:
+        bull_mask = df["ema20"] > df["ema60"]
+        # Group consecutive True values into rectangles
+        changes = bull_mask.ne(bull_mask.shift())
+        groups = changes.cumsum()
+        for gid in groups[bull_mask].unique():
+            group_df = df[groups == gid]
+            if len(group_df) > 0:
+                start_time = group_df["time"].iloc[0]
+                end_time = group_df["time"].iloc[-1] + timedelta(hours=1)
+                fig.add_vrect(
+                    x0=start_time, x1=end_time,
+                    fillcolor="rgba(121, 221, 177, 0.08)",
+                    line_width=0, layer="below"
+                )
+    
+    # 5) Support/Resistance Lines (match Pine line.new pivotHigh/Low)
+    # Calculate pivots from data
+    highs = df["high"].values
+    lows = df["low"].values
+    n = len(df)
+    left_bars = 10
+    right_bars = 10
+    
+    last_pivot_high = None
+    last_pivot_low = None
+    
+    for i in range(n - 1 - right_bars, left_bars - 1, -1):
+        if last_pivot_high is None:
+            window_h = highs[max(0, i-left_bars):min(n, i+right_bars+1)]
+            if len(window_h) > 0 and highs[i] == window_h.max():
+                last_pivot_high = float(highs[i])
+        if last_pivot_low is None:
+            window_l = lows[max(0, i-left_bars):min(n, i+right_bars+1)]
+            if len(window_l) > 0 and lows[i] == window_l.min():
+                last_pivot_low = float(lows[i])
+        if last_pivot_high is not None and last_pivot_low is not None:
+            break
+    
+    # Plot Resistance (Red dashed - match Pine color.red, style=line.style_dashed)
+    if last_pivot_high is not None:
+        fig.add_hline(
+            y=last_pivot_high, line_dash="dash", line_color="#df7777",
+            line_width=1, annotation_text=f"R: {last_pivot_high:,.2f}",
+            annotation_position="top left",
+            annotation_font_size=9, annotation_font_color="#df7777"
+        )
+    
+    # Plot Support (Green dashed - match Pine color.green, style=line.style_dashed)
+    if last_pivot_low is not None:
+        fig.add_hline(
+            y=last_pivot_low, line_dash="dash", line_color="#79ddb1",
+            line_width=1, annotation_text=f"S: {last_pivot_low:,.2f}",
+            annotation_position="bottom left",
+            annotation_font_size=9, annotation_font_color="#79ddb1"
+        )
+    
+    # 6) Buy/Sell Markers (match Pine plotshape)
+    # Load trade history for markers
+    try:
+        history = load_json(HISTORY_FILE, [])
+        sym_history = [t for t in history if t.get("symbol") == symbol]
+        
+        # BUY markers (green triangle-up below bar - match Pine shape.labelup)
+        buy_times = []
+        buy_prices = []
+        for t in sym_history[-10:]:  # Last 10 trades
+            entry_ts = t.get("entry_ts")
+            if entry_ts:
+                buy_times.append(pd.to_datetime(entry_ts, unit="ms"))
+                buy_prices.append(float(t.get("entry", 0)))
+        
+        if buy_times:
+            fig.add_trace(go.Scatter(
+                x=buy_times, y=buy_prices,
+                mode="markers+text", name="BUY",
+                marker=dict(symbol="triangle-up", size=12, color="#79ddb1", line=dict(width=1, color="white")),
+                text=["BUY"] * len(buy_times),
+                textposition="bottom center",
+                textfont=dict(size=8, color="#79ddb1")
+            ))
+        
+        # SELL markers (red triangle-down above bar - match Pine shape.labeldown)
+        sell_times = []
+        sell_prices = []
+        for t in sym_history[-10:]:
+            exit_ts = t.get("exit_ts")
+            if exit_ts:
+                sell_times.append(pd.to_datetime(exit_ts, unit="ms"))
+                sell_prices.append(float(t.get("exit", 0)))
+        
+        if sell_times:
+            fig.add_trace(go.Scatter(
+                x=sell_times, y=sell_prices,
+                mode="markers+text", name="SELL",
+                marker=dict(symbol="triangle-down", size=12, color="#df7777", line=dict(width=1, color="white")),
+                text=["SELL"] * len(sell_times),
+                textposition="top center",
+                textfont=dict(size=8, color="#df7777")
+            ))
+    except Exception:
+        pass
+    
+    # 7) Layout styling (dark theme match dashboard)
+    fig.update_layout(
+        height=height,
+        margin=dict(l=10, r=10, t=30, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#a0aec0", size=10),
+        xaxis=dict(
+            gridcolor="rgba(255,255,255,0.05)",
+            rangeslider=dict(visible=False),
+            type="date"
+        ),
+        yaxis=dict(gridcolor="rgba(255,255,255,0.05)"),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+            font=dict(size=9)
+        ),
+        title=dict(text=f"{symbol} · 1H", font=dict(size=12, color="#e2e8f0"), x=0.01)
+    )
+    
     return fig
 
 
