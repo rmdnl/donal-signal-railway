@@ -569,7 +569,7 @@ if nav in {"OVERVIEW","MARKET"}:
         st.markdown(radar_html, unsafe_allow_html=True)
 
         st.markdown('<div class="section-title">// RISK SNAPSHOT</div>',unsafe_allow_html=True)
-        st.markdown(f'<div class="pane"><table class="terminal-table"><tbody><tr><td>MODE</td><td>{mode_label}</td></tr><tr><td>POSITIONS</td><td>{len(open_rows)}</td></tr><tr><td>RISK/TRD</td><td>{os.getenv("RISK_PCT_PER_TRADE","-")}%</td></tr><tr><td>MAX POS</td><td>{os.getenv("MAX_CONCURRENT_POSITIONS","-")}</td></tr><tr><td>DAILY LIMIT</td><td>{os.getenv("DAILY_LOSS_LIMIT_PCT","-")}%</td></tr></tbody></table></div>',unsafe_allow_html=True)
+        st.markdown(f'<div class="pane"><table class="terminal-table"><tbody><tr><td>MODE</td><td>{mode_label}</td></tr><tr><td>POSITIONS</td><td>{len(open_rows)}</td></tr><tr><td>SIZE</td><td>{os.getenv("PCT_OF_EQUITY","20")}% equity (Pine)</td></tr><tr><td>DAILY LIMIT</td><td>{os.getenv("DAILY_LOSS_LIMIT_PCT","-")}%</td></tr></tbody></table></div>',unsafe_allow_html=True)
     with center:
         selected=st.selectbox("Market", symbols or ["BTC/USDT","ETH/USDT","BNB/USDT","SOL/USDT"], label_visibility="collapsed", key="chart_symbol")
         st.markdown(f'<div class="section-title">// MARKET · {selected.replace("/","")} · 1H</div>',unsafe_allow_html=True)
