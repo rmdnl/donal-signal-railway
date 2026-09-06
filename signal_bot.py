@@ -1393,6 +1393,12 @@ def place_entry_order(state, symbol, signal_data, market_price):
                 exchange.cancel_order(order_id, symbol)
         except Exception as e:
             log.warning(f"{symbol}: gagal cancel sisa partial BUY {client_id}: {e}")
+        # [FIX #3] Update state qty ke filled_qty SEBELUM lanjut ke OCO
+        pos = positions.get(symbol)
+        if pos:
+            pos["filled_qty"] = filled_qty
+            pos["qty"] = filled_qty
+            save_state(state)
         try:
             refreshed = exchange.fetch_order(order_id, symbol) if order_id else None
             if refreshed:
@@ -2623,10 +2629,17 @@ def process_symbol(state, symbol, price_cache):
             profit_pct = (price - entry) / entry * 100.0
             if profit_pct >= BE_TRIGGER_PCT:
                 new_sl = entry * (1 + BE_OFFSET_PCT / 100.0)
-                update_stop_loss(state, symbol, new_sl, reason=f"Break-Even Triggered (Profit {profit_pct:.2f}%)")
-                if symbol in positions:
-                    positions[symbol]["be_triggered"] = True
-                    save_state(state)  # Pastikan flag be_triggered ke-save
+                # [FIX #4] Kalau polling mode (Testnet), cuma update pos["sl"] di state
+                if not USE_NATIVE_OCO_SLTP:
+                    pos["sl"] = new_sl
+                    pos["be_triggered"] = True
+                    save_state(state)
+                    notify_event(f"🛡️ BREAK-EVEN {symbol} [{TRADING_MODE.upper()}]\nSL digeser ke {fmt(new_sl)} (polling mode)")
+                else:
+                    update_stop_loss(state, symbol, new_sl, reason=f"Break-Even Triggered (Profit {profit_pct:.2f}%)")
+                    if symbol in positions:
+                        positions[symbol]["be_triggered"] = True
+                        save_state(state)  # Pastikan flag be_triggered ke-save
 
     # Polling protection applies only when no native OCO is active.
     if TRACK_SL_TP and symbol in positions and positions[symbol].get("status", "open") == "open":

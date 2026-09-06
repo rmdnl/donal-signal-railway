@@ -91,7 +91,7 @@ def get_exchange():
     return ccxt.binance({"enableRateLimit": True, "options": {"defaultType": "spot"}})
 
 
-@st.cache_data(ttl=8)
+@st.cache_data(ttl=3)  # [FIX #5] Turunin dari 8s biar harga lebih fresh
 def fetch_prices(symbols):
     out = {}
     if not symbols:
@@ -167,7 +167,7 @@ def make_candles(raw):
         return None
     df = pd.DataFrame(raw, columns=["ts", "open", "high", "low", "close", "volume"])
     df["time"] = pd.to_datetime(df["ts"], unit="ms")
-    df["ema20"] = df["close"].ewm(span=20, adjust=False).mean()
+    df["ema20"] = df["close"].ewm(alpha=1/20, adjust=False).mean()  # [FIX #8] Match Pine ta.ema(close, 20)
     df["ema60"] = df["close"].ewm(span=60, adjust=False).mean()
     return df
 
@@ -219,7 +219,7 @@ for symbol, pos in positions.items():
 equity=balance+open_value
 unrealized_pct = (unrealized / equity * 100) if equity > 0 else 0.0
 realized=sum(float(t.get("pnl_net",t.get("pnl",0)) or 0) for t in history)
-realized_pct = (realized / equity * 100) if equity > 0 else 0.0
+realized_pct = (realized / balance * 100) if balance > 0 else 0.0  # [FIX #6] Hitung terhadap cash awal, bukan current equity
 wins=sum(1 for t in history if float(t.get("pnl_net",t.get("pnl",0)) or 0)>0)
 win_rate=wins/len(history)*100 if history else 0
 online,age=bot_status(); mode_label=TRADING_MODE.upper() if TRADING_MODE else "OFF"; mode_cls="status" if online else "status off"; age_label=f"STATE {int(age)}s" if age is not None else "NO STATE"
