@@ -1950,6 +1950,26 @@ def place_exit_order(state, symbol, reason, price, qty_override=None):
         notify_error(f"{symbol}: qty exit menjadi 0 setelah precision, SELL dibatalkan.")
         return
 
+    # [FIX] Self-healing exit: clamp qty SELL ke free balance biar gak pernah
+    # gagal "insufficient balance" (fee/dust/rounding/testnet reset).
+    _mkt = exchange.markets.get(symbol) or {}
+    _lim = (_mkt.get("limits") or {}).get("amount") or {}
+    min_amount = float(_lim.get("min") or 0.0)
+    try:
+        _base = symbol.split("/")[0]
+        _free = float((exchange.fetch_balance().get("free") or {}).get(_base) or 0.0)
+        if _free < qty_p:
+            log.warning(f"{symbol}: qty SELL di-clamp {qty_p} -> {_free} (free balance).")
+            qty_p = float(exchange.amount_to_precision(symbol, _free))
+    except Exception as e:
+        log.warning(f"{symbol}: gagal fetch free balance pre-sell: {e}")
+    if qty_p <= 0 or (min_amount > 0 and qty_p < min_amount):
+        notify_error(f"{symbol}: free balance tidak cukup buat SELL (dust/fee/reset). Posisi ditutup di state tanpa order biar gak spam error.")
+        positions.pop(symbol, None)
+        state.setdefault("exit_intents", {}).pop(symbol, None)
+        save_state(state)
+        return
+
     full_close = qty_p >= position_qty * 0.999
     intents = state.setdefault("exit_intents", {})
     intent = intents.get(symbol)
