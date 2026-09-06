@@ -143,17 +143,36 @@ def calculate_signal_strength(symbol, ex):
         tr = pd.concat([df["h"]-df["l"], (df["h"]-df["c"].shift(1)).abs(), (df["l"]-df["c"].shift(1)).abs()], axis=1).max(axis=1)
         df["atr"] = tr.ewm(alpha=1/14, adjust=False).mean()
         
+        # ADX 14 (match Pine ta.dmi(14, 14))
+        plus_dm = df["h"].diff()
+        minus_dm = -df["l"].diff()
+        plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
+        minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
+        atr_w = tr.ewm(alpha=1/14, adjust=False).mean()
+        plus_di = 100 * (plus_dm.ewm(alpha=1/14, adjust=False).mean() / atr_w.replace(0, 1e-10))
+        minus_di = 100 * (minus_dm.ewm(alpha=1/14, adjust=False).mean() / atr_w.replace(0, 1e-10))
+        dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, 1e-10))
+        df["adx"] = dx.ewm(alpha=1/14, adjust=False).mean()
+        
         # Volume MA
         df["vol_ma"] = df["v"].rolling(20).mean()
         
         # HH20 (highest high 20 bars, shifted 1)
         df["hh20"] = df["h"].rolling(20).max().shift(1)
         
+        # Last Pivot High (match Pine ta.pivothigh(high, 10, 10))
+        left_b, right_b = 10, 10
+        last_pivot_high = None
+        for idx in range(left_b, len(df) - right_b):
+            window = df["h"].iloc[idx - left_b:idx + right_b + 1]
+            if df["h"].iloc[idx] == window.max():
+                last_pivot_high = float(df["h"].iloc[idx])
+        
         row = df.iloc[-1]
         prev_row = df.iloc[-2]
         
         score = 0
-        total_checks = 5
+        total_checks = 7
         details = []
         
         # 1. HTF Trend Proxy (EMA20 > EMA60 di 1H sebagai proxy sederhana buat dashboard speed)
@@ -191,6 +210,23 @@ def calculate_signal_strength(symbol, ex):
             details.append("BO✅")
         else:
             details.append("BO❌")
+            
+        # 6. ADX > 20 (match Pine adxOK)
+        if row["adx"] > 20:
+            score += 1
+            details.append("ADX✅")
+        else:
+            details.append("ADX❌")
+            
+        # 7. Resistance Room > 1.0 ATR (match Pine resRoomOK)
+        if last_pivot_high is None or last_pivot_high <= row["c"]:
+            score += 1
+            details.append("ROOM✅")
+        elif (last_pivot_high - row["c"]) > row["atr"] * 1.0:
+            score += 1
+            details.append("ROOM✅")
+        else:
+            details.append("ROOM❌")
             
         pct = int((score / total_checks) * 100)
         status = " | ".join(details)
