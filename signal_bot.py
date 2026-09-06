@@ -2202,6 +2202,13 @@ def send_buy_alert(state, symbol, signal_data, market_price=None):
     vol_scale = float(signal_data.get("vol_scale", 1.0))
     sl, tp, sltp_note = compute_sl_tp(signal_data, entry)
 
+    # [FIX] Cek MIN_RISK_REWARD biar alert konsisten sama mode auto-trading
+    if sl > 0 and entry > sl and tp > entry:
+        rr = (tp - entry) / (entry - sl)
+        if MIN_RISK_REWARD > 0 and rr < MIN_RISK_REWARD:
+            log.info(f"{symbol}: skip BUY alert, R:R {rr:.2f} < minimum {MIN_RISK_REWARD:.2f}.")
+            return
+
     state.setdefault("virtual_positions", {})[symbol] = {
         "status": "open",
         "entry": entry,
