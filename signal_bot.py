@@ -1013,14 +1013,6 @@ def lookup_oco_by_client_id(symbol, list_client_order_id):
     return ("UNKNOWN", None) if saw_unknown else ("NOT_FOUND", None)
 
 
-def find_oco_by_client_id(symbol, list_client_order_id):
-    status, item = lookup_oco_by_client_id(symbol, list_client_order_id)
-    return item if status == "FOUND" else None
-
-
-# =====================
-# AUTO TRADING (Binance API) -- hanya dipakai kalau TRADING_MODE != "off"
-# =====================
 def get_available_quote(quote_asset=None):
     quote_asset = quote_asset or QUOTE_ASSET
     try:
@@ -1088,47 +1080,6 @@ def get_total_equity(state, quote_asset=None):
     return quote_bal + open_value
 
 
-
-def get_total_equity_quote(state):
-    """Ekuitas riil = cash USDT + nilai pasar semua posisi terbuka di state."""
-    # Pakai exchange global kalau tersedia, fallback ke make_exchange()
-    ex = exchange
-    if ex is None:
-        try:
-            ex = make_exchange()
-        except Exception:
-            return 0.0
-    
-    # Fetch cash
-    try:
-        balance = ex.fetch_balance()
-        total = None
-        if QUOTE_ASSET in balance and isinstance(balance[QUOTE_ASSET], dict):
-            total = balance[QUOTE_ASSET].get("total")
-        if total is None:
-            total = (balance.get("total") or {}).get(QUOTE_ASSET)
-        cash = float(total or 0.0)
-    except Exception as e:
-        log.warning(f"Gagal fetch total balance {QUOTE_ASSET}: {e}")
-        cash = 0.0
-    
-    # Hitung nilai posisi
-    positions = state.get("virtual_positions", {}) if isinstance(state, dict) else {}
-    value = 0.0
-    for sym, pos in positions.items():
-        qty = float(pos.get("filled_qty") or pos.get("qty") or 0.0)
-        if qty <= 0:
-            continue
-        px = None
-        try:
-            t = ex.fetch_ticker(sym)
-            px = float(t.get("last") or t.get("bid") or t.get("ask") or 0)
-        except Exception:
-            px = None
-        if not px:
-            px = float(pos.get("entry", 0.0) or 0.0)
-        value += qty * float(px)
-    return cash + value
 
 def compute_sl_tp(signal_data, entry):
     """
