@@ -24,7 +24,7 @@ Padahal bot udah bilang **skip**. 🗿
 ## ✨ Kenapa Bot Ini *Goated*?
 
 ### 🧠 Strategy: "4H Trend, 1H Breakout" (Pine Script Aligned)
-Persis seperti backtest TradingView kamu (`donal2_pine_fixed-2.pine`):
+
 - **HTF Filter (4H):** EMA20 > EMA60 AND RSI > 50 → cuma trade searah tren besar
 - **Entry Trigger (1H):** Close > EMA20 AND RSI > 50 AND Close > Highest High 20 bar
 - **Exit Trigger:** Close < EMA20 OR RSI < 45 → trend exit otomatis di candle close
