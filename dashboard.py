@@ -372,12 +372,16 @@ if nav in {"OVERVIEW","MARKET"}:
         radar_symbols = tuple(all_symbols[:8])  # Scan max 8 symbol dari config
         radar_data = scan_all_signals(radar_symbols)
         
+        # [FIX] Sort by score descending — yang paling siap entry di atas
+        sorted_symbols = sorted(radar_symbols, key=lambda s: radar_data.get(s, (0, ""))[0], reverse=True)
+        
         radar_html = '<div class="pane"><table class="terminal-table"><thead><tr><th>PAIR</th><th>SCORE</th><th>STATUS</th></tr></thead><tbody>'
-        for sym in radar_symbols:
+        for sym in sorted_symbols:
             score, status = radar_data.get(sym, (0, "-"))
             color_cls = "pos" if score >= 80 else ("amber" if score >= 60 else "neg")
             bar = "█" * (score // 20) + "░" * (5 - score // 20)
-            radar_html += f'<tr><td class="pair">{sym.replace("/","")}</td><td class="{color_cls}">{score}% {bar}</td><td style="font-size:9px">{status}</td></tr>'
+            rank_icon = "🔥" if score >= 80 else ("⚡" if score >= 60 else "")
+            radar_html += f'<tr><td class="pair">{rank_icon} {sym.replace("/","")}</td><td class="{color_cls}">{score}% {bar}</td><td style="font-size:9px">{status}</td></tr>'
         radar_html += '</tbody></table></div>'
         st.markdown(radar_html, unsafe_allow_html=True)
 
