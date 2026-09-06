@@ -133,7 +133,7 @@ MAX_POSITION_PCT = env_float("MAX_POSITION_PCT", 25.0)  # [NEW] Cap max posisi %
 # entry DIBATALKAN sebelum order dikirim (0 = nonaktif, selalu entry berapa pun
 # slippage-nya). Untuk exit TIDAK ada guard semacam ini -- exit harus selalu jalan
 # demi risk management, jadi cuma dilaporkan (bukan dibatalkan) berapa pun besarnya.
-MAX_ENTRY_SLIPPAGE_PCT = env_float("MAX_ENTRY_SLIPPAGE_PCT", 0.5)
+MAX_ENTRY_SLIPPAGE_PCT = env_float("MAX_ENTRY_SLIPPAGE_PCT", 0.2)
 USE_LIMIT_ENTRY = env_bool("USE_LIMIT_ENTRY", False)  # [NEW] Pakai limit order instead of market (lebih presisi, match Pine process_orders_on_close)
 LIMIT_ENTRY_BUFFER_PCT = env_float("LIMIT_ENTRY_BUFFER_PCT", 0.1)  # [NEW] Limit price = close + buffer%
 LIMIT_ENTRY_TIMEOUT_SEC = env_int("LIMIT_ENTRY_TIMEOUT_SEC", 120)  # [NEW] Cancel kalau gak fill dalam X detik
