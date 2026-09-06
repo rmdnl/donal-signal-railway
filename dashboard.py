@@ -20,6 +20,30 @@ st.set_page_config(
 )
 st_autorefresh(interval=5000, key="terminal_refresh")
 
+def get_next_candle_countdown(timeframe="1h"):
+    """Hitung mundur ke candle close berikutnya (WIB)."""
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    if timeframe == "1h":
+        next_hour = (now.hour + 1) % 24
+        next_close = now.replace(hour=next_hour, minute=0, second=0, microsecond=0)
+        if next_hour == 0:
+            next_close += timedelta(days=1)
+    else:
+        next_close = now + timedelta(hours=1)
+    
+    diff = next_close - now
+    total_seconds = int(diff.total_seconds())
+    minutes = total_seconds // 60
+    seconds = total_seconds % 60
+    
+    wib_close = next_close + timedelta(hours=7)
+    time_str = wib_close.strftime("%H:%M WIB")
+    
+    return f"{minutes:02d}m {seconds:02d}s", time_str
+
+
+
 STATE_FILE = Path(os.getenv("STATE_FILE", "state_signals.json"))
 HISTORY_FILE = Path(os.getenv("HISTORY_FILE", "trade_history.json"))
 TRADING_MODE = os.getenv("TRADING_MODE", "off").strip().lower()
@@ -222,7 +246,8 @@ realized=sum(float(t.get("pnl_net",t.get("pnl",0)) or 0) for t in history)
 realized_pct = (realized / balance * 100) if balance > 0 else 0.0  # [FIX #6] Hitung terhadap cash awal, bukan current equity
 wins=sum(1 for t in history if float(t.get("pnl_net",t.get("pnl",0)) or 0)>0)
 win_rate=wins/len(history)*100 if history else 0
-online,age=bot_status(); mode_label=TRADING_MODE.upper() if TRADING_MODE else "OFF"; mode_cls="status" if online else "status off"; age_label=f"STATE {int(age)}s" if age is not None else "NO STATE"
+online,age=bot_status()
+countdown, close_time = get_next_candle_countdown(os.getenv("TIMEFRAME", "1h")); mode_label=TRADING_MODE.upper() if TRADING_MODE else "OFF"; mode_cls="status" if online else "status off"; age_label=f"STATE {int(age)}s" if age is not None else "NO STATE"
 
 st.markdown(f'<div class="terminal-bar"><div class="brand"><span class="brand-mark">▣</span> DONAL // TRADING TERMINAL <small>v2.1 · VPS</small></div><div class="top-right"><span class="{mode_cls}">● {"ONLINE" if online else "OFFLINE"}</span><span>{mode_label}</span><span>{age_label}</span><span>{time.strftime("%H:%M:%S WIB")}</span></div></div>', unsafe_allow_html=True)
 
@@ -266,7 +291,7 @@ if nav in {"OVERVIEW","MARKET"}:
         else: st.markdown('<div class="pane"><div class="quote">NO ACTIVE POSITION · CASH IS PATIENT.</div></div>',unsafe_allow_html=True)
     with right:
         st.markdown('<div class="section-title">// SYSTEM</div>',unsafe_allow_html=True)
-        st.markdown(f'<div class="pane"><div class="pane-head"><span>ENGINE STATUS</span><span>{age_label}</span></div><table class="terminal-table"><tbody><tr><td>ENGINE</td><td class="{mode_cls}">{"RUNNING" if online else "STOPPED"}</td></tr><tr><td>EXCHANGE</td><td>BINANCE SPOT</td></tr><tr><td>QUOTE</td><td>{QUOTE_ASSET}</td></tr><tr><td>REFRESH</td><td>5 SEC</td></tr></tbody></table><div class="quote">DISCIPLINE &gt; EMOTION<br>PROTECT CAPITAL FIRST.</div></div>',unsafe_allow_html=True)
+        st.markdown(f'<div class="pane"><div class="pane-head"><span>ENGINE STATUS</span><span>{age_label}</span></div><table class="terminal-table"><tbody><tr><td>ENGINE</td><td class="{mode_cls}">{"RUNNING" if online else "STOPPED"}</td></tr><tr><td>EXCHANGE</td><td>BINANCE SPOT</td></tr><tr><td>QUOTE</td><td>{QUOTE_ASSET}</td></tr><tr><td>REFRESH</td><td>5 SEC</td></tr><tr><td>NEXT SIGNAL</td><td class="amber">{countdown}</td></tr><tr><td>CANDLE CLOSE</td><td>{close_time}</td></tr></tbody></table><div class="quote">DISCIPLINE &gt; EMOTION<br>PROTECT CAPITAL FIRST.</div></div>',unsafe_allow_html=True)
         st.markdown('<div class="section-title">// RECENT TAPE</div>',unsafe_allow_html=True)
         tape=history_rows(history)[:7]
         if tape:
