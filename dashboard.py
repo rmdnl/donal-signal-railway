@@ -115,6 +115,101 @@ def get_exchange():
     return ccxt.binance({"enableRateLimit": True, "options": {"defaultType": "spot"}})
 
 
+
+def calculate_signal_strength(symbol, ex):
+    """Hitung skor sinyal 0-100% berdasarkan kondisi Pine Script."""
+    try:
+        # Fetch data 1H (cukup buat hitung indikator)
+        ohlcv = ex.fetch_ohlcv(symbol, "1h", limit=100)
+        if len(ohlcv) < 60:
+            return 0, "DATA KURANG"
+        
+        import pandas as pd
+        import numpy as np
+        df = pd.DataFrame(ohlcv, columns=["ts", "o", "h", "l", "c", "v"])
+        
+        # Indikator dasar (match Pine)
+        df["ema20"] = df["c"].ewm(span=20, adjust=False).mean()
+        df["ema60"] = df["c"].ewm(span=60, adjust=False).mean()
+        
+        # RSI 14 (Wilder's RMA)
+        delta = df["c"].diff()
+        gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
+        loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
+        rs = gain / loss
+        df["rsi"] = 100 - (100 / (1 + rs))
+        
+        # ATR 14
+        tr = pd.concat([df["h"]-df["l"], (df["h"]-df["c"].shift(1)).abs(), (df["l"]-df["c"].shift(1)).abs()], axis=1).max(axis=1)
+        df["atr"] = tr.ewm(alpha=1/14, adjust=False).mean()
+        
+        # Volume MA
+        df["vol_ma"] = df["v"].rolling(20).mean()
+        
+        # HH20 (highest high 20 bars, shifted 1)
+        df["hh20"] = df["h"].rolling(20).max().shift(1)
+        
+        row = df.iloc[-1]
+        prev_row = df.iloc[-2]
+        
+        score = 0
+        total_checks = 5
+        details = []
+        
+        # 1. HTF Trend Proxy (EMA20 > EMA60 di 1H sebagai proxy sederhana buat dashboard speed)
+        # Note: Dashboard gak fetch 4H biar cepet, jadi pake 1H trend sebagai indikator "siap"
+        if row["ema20"] > row["ema60"]:
+            score += 1
+            details.append("TREND✅")
+        else:
+            details.append("TREND❌")
+            
+        # 2. Price > EMA20
+        if row["c"] > row["ema20"]:
+            score += 1
+            details.append("PRICE✅")
+        else:
+            details.append("PRICE❌")
+            
+        # 3. RSI > 50
+        if row["rsi"] > 50:
+            score += 1
+            details.append("RSI✅")
+        else:
+            details.append("RSI❌")
+            
+        # 4. Volume > 1.5x MA (Pine default)
+        if row["v"] > row["vol_ma"] * 1.5:
+            score += 1
+            details.append("VOL✅")
+        else:
+            details.append("VOL❌")
+            
+        # 5. Breakout HH20
+        if row["c"] > row["hh20"]:
+            score += 1
+            details.append("BO✅")
+        else:
+            details.append("BO❌")
+            
+        pct = int((score / total_checks) * 100)
+        status = " | ".join(details)
+        return pct, status
+        
+    except Exception as e:
+        return 0, f"ERR: {str(e)[:10]}"
+
+@st.cache_data(ttl=10)
+def scan_all_signals(symbols_tuple):
+    """Scan semua symbol, return dict {symbol: (score, status)}."""
+    ex = get_exchange()
+    results = {}
+    for sym in symbols_tuple:
+        score, status = calculate_signal_strength(sym, ex)
+        results[sym] = (score, status)
+    return results
+
+
 @st.cache_data(ttl=3)  # [FIX #5] Turunin dari 8s biar harga lebih fresh
 def fetch_prices(symbols):
     out = {}
@@ -268,6 +363,21 @@ if nav in {"OVERVIEW","MARKET"}:
             p=prices.get(s)
             rows.append(f'<tr><td class="pair">{s.replace("/","")}</td><td>{fmt_price(p) if p else "--"}</td><td>{"OPEN" if s in positions else "-"}</td></tr>')
         st.markdown('<div class="pane"><div class="pane-head"><span>MARKET WATCH</span><span>LIVE</span></div><table class="terminal-table"><thead><tr><th>PAIR</th><th>LAST</th><th>STATE</th></tr></thead><tbody>'+''.join(rows)+'</tbody></table></div>',unsafe_allow_html=True)
+        
+        # SIGNAL RADAR
+        st.markdown('<div class="section-title">// SIGNAL RADAR · SIAP ENTRY?</div>', unsafe_allow_html=True)
+        radar_symbols = tuple(watch[:6])  # Scan max 6 symbol biar cepet
+        radar_data = scan_all_signals(radar_symbols)
+        
+        radar_html = '<div class="pane"><table class="terminal-table"><thead><tr><th>PAIR</th><th>SCORE</th><th>STATUS</th></tr></thead><tbody>'
+        for sym in radar_symbols:
+            score, status = radar_data.get(sym, (0, "-"))
+            color_cls = "pos" if score >= 80 else ("amber" if score >= 60 else "neg")
+            bar = "█" * (score // 20) + "░" * (5 - score // 20)
+            radar_html += f'<tr><td class="pair">{sym.replace("/","")}</td><td class="{color_cls}">{score}% {bar}</td><td style="font-size:9px">{status}</td></tr>'
+        radar_html += '</tbody></table></div>'
+        st.markdown(radar_html, unsafe_allow_html=True)
+
         st.markdown('<div class="section-title">// RISK SNAPSHOT</div>',unsafe_allow_html=True)
         st.markdown(f'<div class="pane"><table class="terminal-table"><tbody><tr><td>MODE</td><td>{mode_label}</td></tr><tr><td>POSITIONS</td><td>{len(open_rows)}</td></tr><tr><td>RISK/TRD</td><td>{os.getenv("RISK_PCT_PER_TRADE","-")}%</td></tr><tr><td>MAX POS</td><td>{os.getenv("MAX_CONCURRENT_POSITIONS","-")}</td></tr><tr><td>DAILY LIMIT</td><td>{os.getenv("DAILY_LOSS_LIMIT_PCT","-")}%</td></tr></tbody></table></div>',unsafe_allow_html=True)
     with center:
