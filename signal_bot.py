@@ -1225,6 +1225,7 @@ def place_entry_order(state, symbol, signal_data, market_price):
 
     avg_price = float(order.get("average") or order.get("price") or 0.0)
     filled_qty = float(order.get("filled") or 0.0)
+    gross_filled = filled_qty  # [FIX] gross executedQty pre-fee; deteksi partial pakai ini, bukan saldo post-fee
     order_id = order.get("id")
     
     # [FEE FIX] Fetch saldo real setelah entry buat handle fee deduction
@@ -1250,6 +1251,7 @@ def place_entry_order(state, symbol, signal_data, market_price):
             if refreshed:
                 avg_price = float(refreshed.get("average") or refreshed.get("price") or avg_price)
                 filled_qty = float(refreshed.get("filled") or filled_qty)
+                gross_filled = filled_qty
                 order = refreshed
         except Exception as e:
             log.warning(f"{symbol}: gagal reconcile/fetch BUY {client_id}: {e}")
@@ -1258,7 +1260,7 @@ def place_entry_order(state, symbol, signal_data, market_price):
     # A market order can theoretically be partially filled. Do not leave the
     # remainder as an unprotected live BUY. Cancel the remainder, then protect
     # only the quantity that is actually owned.
-    if filled_qty > 0 and requested_qty > 0 and filled_qty < requested_qty * 0.999:
+    if gross_filled > 0 and requested_qty > 0 and gross_filled < requested_qty * 0.999:
         try:
             if order_id:
                 exchange.cancel_order(order_id, symbol)
@@ -1275,6 +1277,7 @@ def place_entry_order(state, symbol, signal_data, market_price):
             if refreshed:
                 avg_price = float(refreshed.get("average") or avg_price)
                 filled_qty = float(refreshed.get("filled") or filled_qty)
+                gross_filled = filled_qty
                 order = refreshed
         except Exception as e:
             log.warning(f"{symbol}: gagal refresh partial BUY {client_id}: {e}")
