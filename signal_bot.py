@@ -77,9 +77,6 @@ VOLUME_MA_LENGTH = env_int("VOLUME_MA_LENGTH", 20)
 VOLUME_MULT = env_float("VOLUME_MULT", 1.5)  # Match Pine Script default volMult=1.5
 
 
-MAX_CONCURRENT_POSITIONS = env_int("MAX_CONCURRENT_POSITIONS", 2)
-MAX_POSITIONS_PER_GROUP = env_int("MAX_POSITIONS_PER_GROUP", 1)
-CORRELATED_GROUPS_RAW = os.getenv("CORRELATED_GROUPS", "BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT")
 
 # --- Trading fee (Pine's strategy() already bakes commission_value=0.1 into its
 # backtest results; the Python bot didn't, so gross PnL shown here was overstating
@@ -129,8 +126,6 @@ PCT_OF_EQUITY = env_float("PCT_OF_EQUITY", 20.0)  # match Pine percent_of_equity
 USE_LIMIT_ENTRY = env_bool("USE_LIMIT_ENTRY", False)  # [NEW] Pakai limit order instead of market (lebih presisi, match Pine process_orders_on_close)
 LIMIT_ENTRY_BUFFER_PCT = env_float("LIMIT_ENTRY_BUFFER_PCT", 0.1)  # [NEW] Limit price = close + buffer%
 LIMIT_ENTRY_TIMEOUT_SEC = env_int("LIMIT_ENTRY_TIMEOUT_SEC", 120)  # [NEW] Cancel kalau gak fill dalam X detik
-MAX_ACTUAL_RISK_PCT = env_float("MAX_ACTUAL_RISK_PCT", 1.25)
-RISK_OVERSHOOT_ACTION = os.getenv("RISK_OVERSHOOT_ACTION", "reduce").strip().lower()  # reduce | exit | hold
 
 # Native Binance OCO (One-Cancels-the-Other): SL/TP disimpan DI EXCHANGE, tetap
 # aktif walau bot mati/koneksi putus. Kalau gagal terpasang (versi ccxt beda, dll),
@@ -223,39 +218,6 @@ HISTORY_FILE = Path(os.getenv("HISTORY_FILE", "trade_history.json").strip() or "
 
 exchange = None
 VALID_SYMBOLS = []
-
-
-def parse_correlated_groups(raw):
-    groups = []
-    for chunk in raw.split(";"):
-        members = {s.strip().upper() for s in chunk.split(",") if s.strip()}
-        if members:
-            groups.append(members)
-    return groups
-
-
-CORRELATED_GROUPS = parse_correlated_groups(CORRELATED_GROUPS_RAW)
-
-
-def symbol_group_index(symbol):
-    for idx, group in enumerate(CORRELATED_GROUPS):
-        if symbol in group:
-            return idx
-    return None
-
-
-# =====================
-# HEALTH SERVER
-# =====================
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"DONAL Signal Bot OK")
-
-    def log_message(self, format, *args):
-        pass
 
 
 def start_health_server():
