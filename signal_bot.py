@@ -121,6 +121,7 @@ QUOTE_ASSET = os.getenv("QUOTE_ASSET", "USDT").strip().upper()
 
 # Risk-based position sizing: qty = (equity * RISK_PCT_PER_TRADE%) / (entry - SL)
 RISK_PCT_PER_TRADE = env_float("RISK_PCT_PER_TRADE", 1.0)
+MAX_POSITION_PCT = env_float("MAX_POSITION_PCT", 25.0)  # [NEW] Cap max posisi % dari equity (safety net vs Pine default 20%)
 
 # Entry & exit (SL/TP/trend exit) pakai MARKET order -- prioritas kepastian eksekusi
 # di atas presisi harga. Karena market order langsung fill (bukan menunggu seperti
@@ -1203,6 +1204,12 @@ def calculate_position_size(state, symbol, entry_price, sl_price):
         log.warning(f"{symbol}: qty ({qty}) < minQty exchange ({min_amount}), skip entry.")
         return None
 
+        # [NEW] Cap max posisi berdasarkan MAX_POSITION_PCT (safety net)
+    max_qty_by_pct = (equity_total * MAX_POSITION_PCT / 100.0) / entry if entry > 0 else qty
+    if qty > max_qty_by_pct:
+        log.info(f"{symbol}: qty capped {fmt(qty)} -> {fmt(max_qty_by_pct)} (MAX_POSITION_PCT={MAX_POSITION_PCT}%)")
+        qty = max_qty_by_pct
+    
     return qty
 
 
