@@ -123,9 +123,6 @@ PCT_OF_EQUITY = env_float("PCT_OF_EQUITY", 20.0)  # match Pine percent_of_equity
 # entry DIBATALKAN sebelum order dikirim (0 = nonaktif, selalu entry berapa pun
 # slippage-nya). Untuk exit TIDAK ada guard semacam ini -- exit harus selalu jalan
 # demi risk management, jadi cuma dilaporkan (bukan dibatalkan) berapa pun besarnya.
-USE_LIMIT_ENTRY = env_bool("USE_LIMIT_ENTRY", False)  # [NEW] Pakai limit order instead of market (lebih presisi, match Pine process_orders_on_close)
-LIMIT_ENTRY_BUFFER_PCT = env_float("LIMIT_ENTRY_BUFFER_PCT", 0.1)  # [NEW] Limit price = close + buffer%
-LIMIT_ENTRY_TIMEOUT_SEC = env_int("LIMIT_ENTRY_TIMEOUT_SEC", 120)  # [NEW] Cancel kalau gak fill dalam X detik
 
 # Native Binance OCO (One-Cancels-the-Other): SL/TP disimpan DI EXCHANGE, tetap
 # aktif walau bot mati/koneksi putus. Kalau gagal terpasang (versi ccxt beda, dll),
@@ -1201,53 +1198,7 @@ def place_entry_order(state, symbol, signal_data, market_price):
         intents[symbol]["state"] = "submitted"
         save_state(state)
         try:
-            if USE_LIMIT_ENTRY:
-                _lp = float(signal_data.get('close', 0.0)) * (1 + LIMIT_ENTRY_BUFFER_PCT / 100.0)
-                _lp = float(exchange.price_to_precision(symbol, _lp))
-                log.info(f'{symbol}: LIMIT BUY @ {fmt(_lp)}')
-                order = exchange.create_limit_buy_order(symbol, qty, _lp, {'newClientOrderId': client_id, 'timeInForce': 'GTC'})
-                import time as _t
-                _st = _t.time()
-                _ok = False
-                while _t.time() - _st < LIMIT_ENTRY_TIMEOUT_SEC and RUNNING:
-                    _t.sleep(3)
-                    try:
-                        _r = exchange.fetch_order(order['id'], symbol)
-                        if _r.get('status') == 'closed':
-                            order = _r
-                            log.info(f"{symbol}: LIMIT FILLED @ {_r.get('average')}")
-                            _ok = True
-                            break
-                        elif _r.get('status') in ('canceled', 'rejected'):
-                            if float(_r.get('filled') or 0.0) > 0:
-                                order = _r
-                                _ok = True
-                                break
-                            log.warning(f'{symbol}: LIMIT {_r.get("status")}, skip (no fill)')
-                            intents.pop(symbol, None)
-                            save_state(state)
-                            return
-                    except Exception as e:
-                        log.warning(f'{symbol}: fetch limit err: {e}')
-                if not _ok:
-                    try:
-                        exchange.cancel_order(order['id'], symbol)
-                    except Exception:
-                        pass
-                    try:
-                        _final = exchange.fetch_order(order['id'], symbol)
-                    except Exception:
-                        _final = None
-                    if _final and float(_final.get('filled') or 0.0) > 0:
-                        order = _final
-                    else:
-                        log.warning(f'{symbol}: LIMIT TIMEOUT, skipped (no fill)')
-                        notify_error(f'{symbol}: Limit entry timeout')
-                        intents.pop(symbol, None)
-                        save_state(state)
-                        return
-            else:
-                order = exchange.create_market_buy_order(symbol, qty, {'newClientOrderId': client_id})
+            order = exchange.create_market_buy_order(symbol, qty, {'newClientOrderId': client_id})
         except Exception as e:
             # A timeout is ambiguous. Reconcile by client ID before deciding that
             # the order failed. This is the key duplicate-order protection.
