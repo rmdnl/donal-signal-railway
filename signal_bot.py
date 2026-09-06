@@ -217,6 +217,20 @@ exchange = None
 VALID_SYMBOLS = []
 
 
+class HealthHandler(BaseHTTPRequestHandler):
+    """Minimal healthcheck responder for platforms (e.g. Railway) that poll PORT."""
+
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, format, *args):
+        # Don't spam the app log with every healthcheck hit.
+        pass
+
+
 def start_health_server():
     if PORT <= 0:
         log.info("PORT tidak diset, health server tidak dijalankan.")
@@ -1142,8 +1156,6 @@ def place_entry_order(state, symbol, signal_data, market_price):
         if qty is None or qty <= 0:
             notify_error(f"{symbol}: gagal hitung position size (saldo/minimum order), BUY dibatalkan.")
             return
-
-        log.warning(f"{symbol}: gagal apply precision qty entry: {e}")
     if qty <= 0:
         notify_error(f"{symbol}: qty entry menjadi 0 setelah precision, BUY dibatalkan.")
         return
@@ -1635,8 +1647,8 @@ def _is_dust_remainder(symbol, qty):
     """Return True only when a remainder is below the exchange minimum amount."""
     if qty <= 0:
         return True
-    market = exchange.markets.get(symbol, {}) if getattr(exchange, "markets", None) else {}
-    min_amount = ((market.get("limits", {}).get("amount") or {}).get("min")) if market else None
+    market = (exchange.markets.get(symbol) or {}) if getattr(exchange, "markets", None) else {}
+    min_amount = ((market.get("limits") or {}).get("amount") or {}).get("min")
     if min_amount:
         return qty < float(min_amount) * 1.001
     return qty < 1e-12
