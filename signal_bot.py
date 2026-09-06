@@ -712,8 +712,6 @@ def calculate_signal(symbol):
     last_pivot_high, last_pivot_low = find_last_pivots(df1h, SR_LEFT_BARS, SR_RIGHT_BARS)
 
     # breakoutTrigger di Pine: close > ema20 AND rsi14 > rsiEntryLv AND close > hhN
-    higher_low_ok = True
-    pb_vol_ok = True
     buy_trigger = bool(
     close > row["ema20"]
     and row["rsi14"] > RSI_ENTRY
@@ -1893,13 +1891,6 @@ def place_exit_order(state, symbol, reason, price, qty_override=None):
 
     pos["filled_qty"] = remaining
     pos["qty"] = remaining
-    remaining_entry = float(pos.get("entry", 0.0))
-    remaining_sl = float(pos.get("sl", 0.0))
-    remaining_risk = max(remaining_entry - remaining_sl, 0.0) * remaining
-    # [PATCH AUDIT] pos (termasuk qty tersisa) sudah termutasi di state di atas,
-    # jadi get_total_equity() otomatis menghitungnya (di harga pasar sekarang) --
-    # tidak perlu ditambah manual lagi.
-    remaining_equity = get_total_equity(state, QUOTE_ASSET)
     # The old OCO was canceled before this manual exit. Re-arm protection for the
     # remainder with a fresh deterministic OCO intent.
     save_state(state)
@@ -2062,7 +2053,6 @@ def send_buy_alert(state, symbol, signal_data, market_price=None):
         log.warning(f"{symbol}: entry atau ATR tidak valid, skip BUY alert.")
         return
 
-    vol_scale = float(signal_data.get("vol_scale", 1.0))
     sl, tp, sltp_note = compute_sl_tp(signal_data, entry)
 
 
@@ -2077,7 +2067,6 @@ def send_buy_alert(state, symbol, signal_data, market_price=None):
         "created_ts": int(time.time() * 1000),
     }
 
-    vol_note = ""
 
     volume_ratio = signal_data.get("volume_ratio")
     volume_note = f"\nVolume: {volume_ratio:.2f}x MA" if volume_ratio is not None else ""
@@ -2085,8 +2074,6 @@ def send_buy_alert(state, symbol, signal_data, market_price=None):
     adx_val = signal_data.get("adx_val")
     adx_note = f"\nADX: {adx_val:.2f} (Trend Strength)" if adx_val is not None else ""
 
-    session_ok = signal_data.get("session_ok", True)
-    session_note = "\nSesi: Aktif (UTC)" if session_ok else ""
 
     # Breakeven price after round-trip fee (entry fee + exit fee), so TP that
     # looks profitable gross may barely clear fees net -- worth seeing upfront.
@@ -2102,10 +2089,9 @@ def send_buy_alert(state, symbol, signal_data, market_price=None):
         f"SL: {fmt(sl)}\n"
         f"TP: {fmt(tp)}\n"
         f"ATR: {fmt(atr_val)}\n"
-        f"{sltp_note}{vol_note}"
+        f"{sltp_note}"
         f"{volume_note}"
         f"{adx_note}"
-        f"{session_note}"
         f"{fee_note}\n"
         f"Catatan: Eksekusi manual, gunakan risiko kecil."
     )
@@ -2269,45 +2255,8 @@ def check_loss_limits_and_maybe_halt(state):
 
 
 # =====================
-# EXPOSURE / CORRELATION GUARD
+# RESTART RECOVERY
 # =====================
-def update_stop_loss(state, symbol, new_sl, reason=""):
-    positions = state.get("virtual_positions", {})
-    pos = positions.get(symbol)
-    if not pos:
-        return
-        
-    old_sl = float(pos.get("sl", 0.0))
-    if new_sl <= old_sl:
-        return  # Jangan pernah menurunkan SL
-        
-    # State SL harus selalu mencerminkan stop yang benar-benar aktif di exchange.
-    if pos.get("status") == "open_oco":
-        order_list_id = pos.get("oco_order_list_id")
-        try:
-            if order_list_id:
-                cancel_oco_exit(symbol, order_list_id)
-            pos["status"] = "open"
-            for key in ("oco_order_list_id", "oco_tp_order_id", "oco_sl_order_id",
-                        "oco_list_client_order_id", "oco_tp_client_order_id", "oco_sl_client_order_id"):
-                pos.pop(key, None)
-            state.setdefault("oco_intents", {}).pop(symbol, None)
-            pos["sl"] = new_sl
-            # Commit the cancellation + new SL before attempting the replacement
-            # OCO, so a VPS crash cannot resurrect the old protection on restart.
-            save_state(state)
-        except Exception as e:
-            log.warning(f"{symbol}: Gagal cancel OCO lama untuk update SL: {e}")
-            return
-
-        try_place_native_protection(state, symbol)
-    else:
-        pos["sl"] = new_sl
-        save_state(state)
-    
-    # Remove duplicate save_state - only save once
-    notify_event(f"🛡️ SL DI-UPDATE {symbol} ({reason})\nSL Lama: {fmt(old_sl)}\nSL Baru: {fmt(new_sl)}")
-
 def reconcile_pending_orders(state):
     """Recover ambiguous BUY/SELL intents after a process/VPS restart."""
     if TRADING_MODE == "off":
