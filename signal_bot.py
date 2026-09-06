@@ -100,10 +100,6 @@ SEND_TREND_EXIT = env_bool("SEND_TREND_EXIT", True)
 ENTRY_ON_FIRST_RUN = env_bool("ENTRY_ON_FIRST_RUN", False)
 MAX_ENTRY_DELAY_MINUTES = env_int("MAX_ENTRY_DELAY_MINUTES", 15)
 
-# --- SESSION FILTER (enhancement) ---
-SESSION_FILTER_ENABLED = env_bool("SESSION_FILTER_ENABLED", True)
-SESSION_START_HOUR = env_int("SESSION_START_HOUR", 8)
-SESSION_END_HOUR = env_int("SESSION_END_HOUR", 22)
 
 # =====================
 # AUTO TRADING (Binance API)
@@ -299,15 +295,6 @@ def sleep_interruptible(seconds):
         time.sleep(1)
 
 
-def is_allowed_session(ts_ms):
-    if not SESSION_FILTER_ENABLED:
-        return True
-    dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
-    hour = dt.hour
-    if SESSION_START_HOUR <= SESSION_END_HOUR:
-        return SESSION_START_HOUR <= hour < SESSION_END_HOUR
-    else:
-        return hour >= SESSION_START_HOUR or hour < SESSION_END_HOUR
 
 
 # =====================
@@ -742,8 +729,6 @@ def calculate_signal(symbol):
     row = df1h.iloc[-1]
 
     tf_ms = exchange.parse_timeframe(TIMEFRAME) * 1000
-    candle_close_ts = int(row["ts"]) + tf_ms
-    session_ok = is_allowed_session(candle_close_ts)
 
     required = [
         row["ema20"], row["rsi14"], row["hh20_prev"], row["atr14"],
@@ -807,7 +792,7 @@ def calculate_signal(symbol):
             sl_mult = SL_MULT * vol_scale
             tp_mult = TP_MULT * vol_scale
 
-    buy_signal = bool(bull_trend and buy_trigger and res_room_ok and volume_ok and session_ok and adx_ok)
+    buy_signal = bool(bull_trend and buy_trigger and res_room_ok and volume_ok and adx_ok)
 
     exit_trend = bool(close < row["ema20"] or row["rsi14"] < RSI_EXIT)
 
@@ -829,7 +814,6 @@ def calculate_signal(symbol):
         "sl_mult": sl_mult,
         "tp_mult": tp_mult,
         "vol_scale": vol_scale,
-        "session_ok": session_ok,
     }
 
 
@@ -2792,7 +2776,6 @@ def run():
         f"Weekly loss limit: {f'{WEEKLY_LOSS_LIMIT_PCT}%' if WEEKLY_LOSS_LIMIT_PCT > 0 else 'nonaktif'}",
         f"Track SL/TP: {TRACK_SL_TP}",
         f"Send trend exit: {SEND_TREND_EXIT}",
-        f"Session filter: {SESSION_FILTER_ENABLED} (UTC {SESSION_START_HOUR}:00-{SESSION_END_HOUR}:00)",
     ]
 
     if TRADING_MODE != "off":
