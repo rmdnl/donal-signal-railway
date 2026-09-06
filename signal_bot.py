@@ -75,7 +75,7 @@ ADX_THRESHOLD = env_float("ADX_THRESHOLD", 20.0)
 
 # --- Strategy variant ---
 VOLUME_MA_LENGTH = env_int("VOLUME_MA_LENGTH", 20)
-VOLUME_MULT = env_float("VOLUME_MULT", 1.0)
+VOLUME_MULT = env_float("VOLUME_MULT", 1.5)  # Match Pine Script default volMult=1.5
 
 USE_VOL_SCALED_SLTP = env_bool("USE_VOL_SCALED_SLTP", True)
 ATR_MA_LENGTH = env_int("ATR_MA_LENGTH", 50)
