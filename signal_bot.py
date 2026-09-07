@@ -2555,8 +2555,7 @@ def process_symbol(state, symbol, price_cache):
 # MAIN LOOP
 # =====================
 def run():
-    global exchange
-
+    global exchange, RUNNING
     if TRADING_MODE not in ("off", "testnet", "live"):
         notify_error(f"TRADING_MODE='{TRADING_MODE}' tidak dikenal (harus off/testnet/live). Bot berhenti.")
         return
