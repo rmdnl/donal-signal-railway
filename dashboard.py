@@ -20,29 +20,30 @@ st.set_page_config(
 )
 st_autorefresh(interval=5000, key="terminal_refresh")
 
-def get_next_candle_countdown(timeframe="1h"):
-    """Hitung mundur ke candle close berikutnya (WIB)."""
+def _tf_minutes(tf):
+    # Helper: konversi timeframe Binance ke menit (15m/30m/1h/2h/4h/1d/1w)
+    import re as _re
+    m = _re.match(r"(\d+)([mhdw])", (tf or "1h").lower())
+    if not m:
+        return 60
+    v, u = int(m.group(1)), m.group(2)
+    return v * {"m": 1, "h": 60, "d": 1440, "w": 10080}[u]
+
+def get_next_candle_countdown(timeframe=None):
+    # P1.17: generic countdown dari epoch, sesuai timeframe actual (bukan hardcode 1h)
     from datetime import datetime, timezone, timedelta
+    tf = timeframe or TIMEFRAME
     now = datetime.now(timezone.utc)
-    if timeframe == "1h":
-        next_hour = (now.hour + 1) % 24
-        next_close = now.replace(hour=next_hour, minute=0, second=0, microsecond=0)
-        if next_hour == 0:
-            next_close += timedelta(days=1)
-    else:
-        next_close = now + timedelta(hours=1)
-    
+    tf_ms = _tf_minutes(tf) * 60 * 1000
+    epoch_ms = int(now.timestamp() * 1000)
+    next_close_ms = ((epoch_ms // tf_ms) + 1) * tf_ms
+    next_close = datetime.fromtimestamp(next_close_ms / 1000, tz=timezone.utc)
     diff = next_close - now
     total_seconds = int(diff.total_seconds())
     minutes = total_seconds // 60
     seconds = total_seconds % 60
-    
     wib_close = next_close + timedelta(hours=7)
-    time_str = wib_close.strftime("%H:%M WIB")
-    
-    return f"{minutes:02d}m {seconds:02d}s", time_str
-
-
+    return f"{minutes:02d}m {seconds:02d}s", wib_close.strftime("%H:%M WIB")
 
 STATE_FILE = Path(os.getenv("STATE_FILE", "state_signals.json"))
 HISTORY_FILE = Path(os.getenv("HISTORY_FILE", "trade_history.json"))
@@ -52,6 +53,8 @@ QUOTE_ASSET = os.getenv("QUOTE_ASSET", "USDT").upper()
 VOLUME_MULT = float(os.getenv("VOLUME_MULT", "1.5"))
 ADX_THRESHOLD = float(os.getenv("ADX_THRESHOLD", "20"))
 MIN_ROOM_ATR = float(os.getenv("MIN_ROOM_ATR", "1.0"))
+TIMEFRAME = os.getenv("TIMEFRAME", "1h").strip()
+HTF_TIMEFRAME = os.getenv("HTF_TIMEFRAME", "4h").strip()
 
 st.markdown(
     r"""
@@ -126,7 +129,7 @@ def calculate_signal_strength(symbol, ex):
         import numpy as np
         
         # Fetch data 1H
-        ohlcv = ex.fetch_ohlcv(symbol, "1h", limit=100)
+        ohlcv = ex.fetch_ohlcv(symbol, TIMEFRAME, limit=100)
         if len(ohlcv) < 60:
             return 0, "DATA KURANG"
         
@@ -178,7 +181,7 @@ def calculate_signal_strength(symbol, ex):
         
         # HTF 4H trend (fetch actual 4H data, match Pine)
         try:
-            ohlcv_4h = ex.fetch_ohlcv(symbol, "4h", limit=80)
+            ohlcv_4h = ex.fetch_ohlcv(symbol, HTF_TIMEFRAME, limit=80)
             if len(ohlcv_4h) >= 62:
                 df4h = pd.DataFrame(ohlcv_4h, columns=["ts", "o", "h", "l", "c", "v"])
                 htf_ema20 = df4h["c"].ewm(span=20, adjust=False).mean().iloc[-2]
@@ -392,7 +395,7 @@ def terminal_chart(df, symbol="", height=470):
             group_df = df[groups == gid]
             if len(group_df) > 0:
                 start_time = group_df["time"].iloc[0]
-                end_time = group_df["time"].iloc[-1] + timedelta(hours=1)
+                end_time = group_df["time"].iloc[-1] + timedelta(minutes=_tf_minutes(TIMEFRAME))
                 fig.add_vrect(
                     x0=start_time, x1=end_time,
                     fillcolor="rgba(121, 221, 177, 0.08)",
@@ -503,7 +506,7 @@ def terminal_chart(df, symbol="", height=470):
             orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
             font=dict(size=9)
         ),
-        title=dict(text=f"{symbol} · 1H", font=dict(size=12, color="#e2e8f0"), x=0.01)
+        title=dict(text=f"{symbol} · {TIMEFRAME.upper()}", font=dict(size=12, color="#e2e8f0"), x=0.01)
     )
     
     return fig
@@ -534,7 +537,8 @@ for symbol, pos in positions.items():
     entry = float(pos.get("entry", 0) or 0)
     qty = float(pos.get("filled_qty") or pos.get("qty") or 0)
     if qty == 0 and TRADING_MODE == "off":
-        qty = 1.0
+        # P1.8: virtual notional eksplisit (bukan qty=1 palsu)
+        qty = (float(os.getenv("VIRTUAL_BALANCE", "1000")) * (float(os.getenv("PCT_OF_EQUITY", "20")) / 100.0)) / entry if entry else 0.0
     live = float(prices.get(symbol) or entry or 0)
     pnl = (live - entry) * qty
     pnl_pct = ((live - entry) / entry * 100) if entry else 0
@@ -575,7 +579,7 @@ if nav in {"OVERVIEW","MARKET"}:
         st.markdown('<div class="pane"><div class="pane-head"><span>MARKET WATCH</span><span>LIVE</span></div><table class="terminal-table"><thead><tr><th>PAIR</th><th>LAST</th><th>STATE</th></tr></thead><tbody>'+''.join(rows)+'</tbody></table></div>',unsafe_allow_html=True)
         
         # SIGNAL RADAR
-        st.markdown('<div class="section-title">// SIGNAL RADAR · LAST CLOSED 1H</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">// SIGNAL RADAR · LAST CLOSED {TIMEFRAME.upper()}</div>', unsafe_allow_html=True)
         # [FIX] Scan semua symbol dari env SYMBOLS, bukan cuma yang ada di state
         env_symbols = os.getenv("SYMBOLS", "BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT")
         all_symbols = [s.strip() for s in env_symbols.split(",") if s.strip()]
@@ -599,8 +603,8 @@ if nav in {"OVERVIEW","MARKET"}:
         st.markdown(f'<div class="pane"><table class="terminal-table"><tbody><tr><td>MODE</td><td>{mode_label}</td></tr><tr><td>POSITIONS</td><td>{len(open_rows)}</td></tr><tr><td>SIZE</td><td>{os.getenv("PCT_OF_EQUITY","20")}% equity (Pine)</td></tr><tr><td>DAILY LIMIT</td><td>{os.getenv("DAILY_LOSS_LIMIT_PCT","-")}%</td></tr><tr><td>WEEKLY LIMIT</td><td>{os.getenv("WEEKLY_LOSS_LIMIT_PCT","-")}%</td></tr></tbody></table></div>',unsafe_allow_html=True)
     with center:
         selected=st.selectbox("Market", symbols or ["BTC/USDT","ETH/USDT","BNB/USDT","SOL/USDT"], label_visibility="collapsed", key="chart_symbol")
-        st.markdown(f'<div class="section-title">// MARKET · {selected.replace("/","")} · 1H</div>',unsafe_allow_html=True)
-        df=make_candles(fetch_ohlcv(selected,"1h",96))
+        st.markdown(f'<div class="section-title">// MARKET · {selected.replace("/","")} · {TIMEFRAME.upper()}</div>',unsafe_allow_html=True)
+        df=make_candles(fetch_ohlcv(selected, TIMEFRAME, 96))
         if df is not None and len(df)>=2:
             last=float(df.close.iloc[-1]); prev=float(df.close.iloc[-2]); change=(last-prev)/prev*100 if prev else 0
             st.markdown(f'<div class="pane chart-shell"><div class="pane-head"><span>OHLC / EMA20 / EMA60</span><span>{fmt_price(last)} · <span class="{"pos" if change>=0 else "neg"}">{change:+.2f}%</span></span></div>',unsafe_allow_html=True)

@@ -14,6 +14,32 @@ import numpy as np
 import pandas as pd
 import ccxt
 from dotenv import load_dotenv
+import fcntl
+
+# ===== Custom Safety Exceptions (P0/P1) =====
+class StateMissingError(RuntimeError): pass
+class StateCorruptError(RuntimeError): pass
+class StatePermissionError(RuntimeError): pass
+class StateIOError(RuntimeError): pass
+class StateMismatchError(RuntimeError): pass
+class BalanceFetchError(RuntimeError): pass
+class UnknownOrderError(RuntimeError): pass
+class TickerUnavailableError(RuntimeError): pass
+
+LOCK_FILE = Path(os.getenv('LOCK_FILE', 'donal_bot.lock'))
+_lock_fd = None
+
+def acquire_lock():
+    # P1.5: single-instance lock (flock) untuk VPS Linux
+    global _lock_fd
+    _lock_fd = open(LOCK_FILE, 'w')
+    try:
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_fd.write(str(os.getpid()))
+        _lock_fd.flush()
+    except IOError:
+        raise RuntimeError(f'[FATAL] Bot instance lain sedang berjalan (lock: {LOCK_FILE}). FAIL CLOSED.')
+
 
 load_dotenv()
 
@@ -53,6 +79,7 @@ HTF_TIMEFRAME = os.getenv("HTF_TIMEFRAME", "4h")
 
 ATR_LENGTH = env_int("ATR_LENGTH", 14)
 RSI_LENGTH = env_int("RSI_LENGTH", 14)
+HTF_RSI_LENGTH = env_int("HTF_RSI_LENGTH", 14)  # Pine: HTF RSI fixed 14
 SL_MULT = env_float("SL_MULT", 1.5)
 TP_MULT = env_float("TP_MULT", 2.5)
 RSI_ENTRY = env_int("RSI_ENTRY", 50)
@@ -197,6 +224,8 @@ def get_state_path():
         test_file.unlink()
         return p
     except Exception as e:
+        if TRADING_MODE == "live":
+            raise StatePermissionError(f"[FATAL] State path {raw} tidak writable di LIVE: {e}. FAIL CLOSED.")
         fallback = Path("/tmp/state_signals.json")
         try:
             fallback.parent.mkdir(parents=True, exist_ok=True)
@@ -446,9 +475,12 @@ def load_state():
                 ) from e
             state = _default_state()
     else:
-        # First run: state file belum ada. save_state() di run()
-        # akan membuatnya dengan state default; cukup catat log.
-        log.info("State file belum ada (first run); pakai state baru.")
+        if TRADING_MODE == "live" and os.getenv("ALLOW_LIVE_FRESH_INIT", "false").strip().lower() != "true":
+            raise StateMissingError(
+                f"[FATAL] STATE_MISSING di MODE LIVE ({STATE_FILE}). Bukan first-run otomatis: "
+                f"restore backup atau set ALLOW_LIVE_FRESH_INIT=true untuk explicit init."
+            )
+        log.info("State file belum ada (first run / explicit init); pakai state baru.")
     return state
 
 
@@ -457,8 +489,17 @@ def save_state(state):
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         state["version"] = 4
         tmp = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
-        tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, STATE_FILE)
+        try:
+            dir_fd = os.open(str(STATE_FILE.parent), os.O_RDONLY)
+            os.fsync(dir_fd)
+            os.close(dir_fd)
+        except Exception:
+            pass
     except Exception as e:
         if TRADING_MODE in ("live", "testnet"):
             raise StatePersistenceError(
@@ -505,6 +546,7 @@ def save_trade_history(symbol, pos, exit_price, reason, pnl_quote_gross=None, pn
         "pnl_pct_net": round(pnl_pct_net, 4),
         "pnl_pct": round(pnl_pct_net, 4),  # backward-compatible alias = NET
         "reason": reason,
+        "virtual": TRADING_MODE == "off",
         "entry_ts": int(pos.get("created_ts") or pos.get("entry_bar_ts") or 0),
         "exit_ts": int(time.time() * 1000),
     })
@@ -522,12 +564,23 @@ def save_trade_history(symbol, pos, exit_price, reason, pnl_quote_gross=None, pn
 # INDICATORS
 # =====================
 def ensure_performance_baseline(state):
-    """Catat starting equity SEKALI saat initialization (bot start).
-    Return % = realized / STARTING equity (bukan current balance).
-    Reset manual: hapus performance_baseline.json."""
+    # P1.9: baseline terikat context (mode + symbols + timeframe).
+    # Ganti context = reset baseline, tidak silently reuse lintas mode.
     try:
+        symbols_hash = hashlib.md5(",".join(sorted(VALID_SYMBOLS)).encode()).hexdigest()[:8]
+        context = {"mode": TRADING_MODE, "symbols": symbols_hash, "tf": TIMEFRAME}
         if BASELINE_FILE.exists():
-            return
+            try:
+                existing = json.loads(BASELINE_FILE.read_text(encoding="utf-8"))
+                if (existing.get("mode") != TRADING_MODE
+                        or existing.get("symbols") != symbols_hash
+                        or existing.get("tf") != TIMEFRAME):
+                    log.warning(f"Baseline context mismatch {existing.get('mode')}/{existing.get('symbols')}/{existing.get('tf')} != {TRADING_MODE}/{symbols_hash}/{TIMEFRAME}; reset baseline.")
+                    BASELINE_FILE.unlink()
+                else:
+                    return
+            except Exception:
+                BASELINE_FILE.unlink()
         if TRADING_MODE == "off":
             start_equity = float(os.getenv("VIRTUAL_BALANCE", "1000"))
         else:
@@ -536,12 +589,13 @@ def ensure_performance_baseline(state):
             log.warning("Starting equity tidak valid; baseline dicoba lagi di restart berikutnya.")
             return
         tmp = BASELINE_FILE.with_suffix(BASELINE_FILE.suffix + ".tmp")
-        tmp.write_text(json.dumps({"start_equity": start_equity, "mode": TRADING_MODE, "created_ts": int(time.time() * 1000)}, indent=2), encoding="utf-8")
+        data = {"start_equity": start_equity, "created_ts": int(time.time() * 1000)}
+        data.update(context)
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, BASELINE_FILE)
-        log.info(f"Performance baseline dicatat: starting equity = {start_equity:.2f} {QUOTE_ASSET}")
+        log.info(f"Performance baseline dicatat: {start_equity:.2f} {QUOTE_ASSET} context={context}")
     except Exception as e:
         log.warning(f"Gagal catat performance baseline: {e}")
-
 
 def ema(series, length):
     return series.ewm(span=length, adjust=False).mean()
@@ -671,7 +725,7 @@ def get_htf_bull_trend(symbol):
     df4h = fetch_closed_ohlcv(symbol, HTF_TIMEFRAME, 100)
     df4h["ema20"] = ema(df4h["close"], 20)
     df4h["ema60"] = ema(df4h["close"], 60)
-    df4h["rsi14"] = rsi(df4h["close"], RSI_LENGTH)
+    df4h["rsi14"] = rsi(df4h["close"], HTF_RSI_LENGTH)
     htf = df4h.iloc[-1]
 
     if pd.isna(htf["ema20"]) or pd.isna(htf["ema60"]) or pd.isna(htf["rsi14"]):
@@ -1000,6 +1054,8 @@ def get_available_quote(quote_asset=None):
             free = (balance.get("free") or {}).get(quote_asset)
         return float(free or 0.0)
     except Exception as e:
+        if TRADING_MODE == "live":
+            raise BalanceFetchError(f"[FATAL] Gagal fetch available {quote_asset}: {e}") from e
         log.warning(f"Gagal fetch available {quote_asset}: {e}")
         return 0.0
 
@@ -1018,6 +1074,8 @@ def get_equity(quote_asset=None):
             return get_available_quote(quote_asset)
         return float(total or 0.0)
     except Exception as e:
+        if TRADING_MODE == "live":
+            raise BalanceFetchError(f"[FATAL] Gagal fetch total balance {quote_asset}: {e}") from e
         log.warning(f"Gagal fetch total balance {quote_asset}: {e}")
         return 0.0
 
@@ -1050,7 +1108,8 @@ def get_total_equity(state, quote_asset=None):
         except Exception:
             price = None
         if not price:
-            # Fallback: harga entry, lebih baik dari 0 kalau ticker gagal diambil.
+            if TRADING_MODE == "live":
+                raise TickerUnavailableError(f"[FATAL] Ticker {pos_symbol} tidak tersedia untuk sizing/equity di LIVE.")
             price = float(pos.get("entry") or 0.0)
         open_value += qty * price
     return quote_bal + open_value
@@ -1750,6 +1809,21 @@ def process_open_oco_position(state, symbol):
             except Exception as e:
                 mark_protection_unknown(state, symbol, f"partial OCO fill tetapi cancel order-list lama UNKNOWN: {e}")
                 return
+        if partial_filled > float(pos.get("recorded_partial_qty") or 0.0):
+            partial_pos = dict(pos)
+            partial_pos["qty"] = partial_filled
+            partial_pos["filled_qty"] = partial_filled
+            if sl_filled_qty > 0:
+                part_ref = float(pos.get("sl") or 0.0)
+                part_price = float(sl_order.get("average") or sl_order.get("price") or part_ref)
+                part_reason = "SL HIT (native OCO partial)"
+            else:
+                part_ref = float(pos.get("tp") or 0.0)
+                part_price = float(tp_order.get("average") or tp_order.get("price") or part_ref)
+                part_reason = "TP HIT (native OCO partial)"
+            part_slip = (part_price - part_ref) / part_ref * 100.0 if part_ref else None
+            pos["recorded_partial_qty"] = partial_filled
+            record_partial_exit(state, symbol, partial_pos, part_price, part_reason, slippage_pct=part_slip)
         remaining = max(qty_target - partial_filled, 0.0)
         pos["filled_qty"] = remaining
         pos["qty"] = remaining
@@ -2157,8 +2231,15 @@ def send_exit_alert(state, symbol, reason, price=None):
     pnl_pct_gross = (pnl / entry * 100.0) if entry > 0 else 0.0
     pnl_pct_net = pnl_pct_gross - ROUND_TRIP_FEE_PCT
 
-    # Signal-only tidak punya fill/qty riil, jadi history hanya menyimpan % net.
-    save_trade_history(symbol, pos, exit_price, reason)
+    # P1.8: signal-only pakai virtual notional eksplisit (VIRTUAL_BALANCE * PCT_OF_EQUITY),
+    # bukan qty=1 palsu. Quote PnL di history = simulasi sizing Pine, diberi flag virtual.
+    virtual_equity = float(os.getenv("VIRTUAL_BALANCE", "1000"))
+    virtual_qty = (virtual_equity * (PCT_OF_EQUITY / 100.0)) / entry if entry > 0 else 0.0
+    pnl_quote_gross = pnl * virtual_qty
+    fees_quote = (entry * virtual_qty + exit_price * virtual_qty) * TAKER_FEE_PCT / 100.0
+    pnl_quote_net = pnl_quote_gross - fees_quote
+    save_trade_history(symbol, pos, exit_price, reason,
+                       pnl_quote_gross=pnl_quote_gross, pnl_quote_net=pnl_quote_net, fees_quote=fees_quote)
     
     positions.pop(symbol, None)
     record_realized_pnl(state, pnl_pct_net)  # tidak ada qty riil di signal-only, cuma %
@@ -2299,11 +2380,57 @@ def check_loss_limits_and_maybe_halt(state):
 # RESTART RECOVERY
 # =====================
 def verify_exchange_state(state):
-    """[SAFETY] Cross-check realita exchange vs state lokal.
-    Live: open order asing -> RuntimeError (fail-closed).
-    Testnet: warning saja. Aset asing > $10: warning (dust diabaikan)."""
+    # P0.2 + P0.3: hard reconciliation local state vs Binance.
+    # Unknown order / mismatch balance = FAIL CLOSED di LIVE.
     if TRADING_MODE not in ("live", "testnet"):
         return
+    try:
+        bal = exchange.fetch_balance()
+    except Exception as e:
+        if TRADING_MODE == "live":
+            raise BalanceFetchError(f"[FATAL] Gagal fetch balance untuk reconciliation: {e}") from e
+        log.warning(f"verify_exchange_state: gagal fetch balance: {e}")
+        return
+    totals = bal.get("total") or {}
+    positions = state.get("virtual_positions") or {}
+
+    def _min_amt(sym):
+        mkt = exchange.markets.get(sym) or {}
+        return float(((mkt.get("limits") or {}).get("amount") or {}).get("min") or 0.0)
+
+    # P0.2a: local position harus punya asset di Binance
+    for sym, pos in positions.items():
+        base = sym.split("/")[0]
+        pos_qty = float(pos.get("filled_qty") or pos.get("qty") or 0.0)
+        if pos_qty <= 0:
+            continue
+        ex_total = float(totals.get(base) or 0.0)
+        tol = max(_min_amt(sym), pos_qty * 0.005)
+        if ex_total + tol < pos_qty:
+            msg = f"[SAFETY] MISMATCH: local {sym} qty={pos_qty} vs Binance {base} total={ex_total}."
+            if TRADING_MODE == "live":
+                raise StateMismatchError(msg + " FAIL CLOSED: reconciliation manual diperlukan.")
+            notify_error(msg)
+    # P0.2b: asset signifikan di Binance tanpa posisi local (managed symbols)
+    for base, amt in totals.items():
+        amt = float(amt or 0)
+        if amt <= 0 or base == QUOTE_ASSET:
+            continue
+        sym = f"{base}/{QUOTE_ASSET}"
+        if sym not in VALID_SYMBOLS or sym in positions:
+            continue
+        if amt <= _min_amt(sym) * 1.001:
+            continue
+        try:
+            px = float(exchange.fetch_ticker(sym).get("last") or 0)
+        except Exception:
+            px = 0.0
+        if amt * px > 10.0:
+            msg = f"[SAFETY] MISMATCH: Binance {base}={amt} (~{amt * px:.2f}) tanpa posisi local di {sym}."
+            if TRADING_MODE == "live":
+                raise StateMismatchError(msg + " FAIL CLOSED: reconciliation manual diperlukan.")
+            notify_error(msg)
+    # P0.3: setiap open order wajib terbukti milik bot (clientOrderId/OCO child IDs)
     try:
         open_orders = []
         for sym in VALID_SYMBOLS:
@@ -2312,54 +2439,39 @@ def verify_exchange_state(state):
                 open_orders.extend(sym_orders)
     except Exception as e:
         if TRADING_MODE == "live":
-            raise RuntimeError(f"[SAFETY] Gagal verifikasi open orders exchange: {e}. Bot berhenti (fail-closed).")
+            raise RuntimeError(f"[SAFETY] Gagal fetch open orders di LIVE: {e}") from e
         log.warning(f"verify_exchange_state: gagal fetch open orders: {e}")
         return
     tracked_ids = set()
     for key in ("entry_intents", "exit_intents", "oco_intents"):
         for _sym, it in (state.get(key) or {}).items():
-            cid = it.get("client_order_id")
-            if cid:
-                tracked_ids.add(cid)
-    positions = state.get("virtual_positions") or {}
+            for k in ("client_order_id", "tp_client_order_id", "sl_client_order_id", "list_client_order_id"):
+                if it.get(k):
+                    tracked_ids.add(it[k])
+            lc = it.get("list_client_order_id")
+            if lc:
+                tracked_ids.add(_client_order_id("DONALT", _sym, lc))
+                tracked_ids.add(_client_order_id("DONALS", _sym, f"{lc}|SL"))
+    for _sym, pos in positions.items():
+        for k in ("entry_client_order_id", "oco_list_client_order_id", "oco_tp_client_order_id", "oco_sl_client_order_id"):
+            if pos.get(k):
+                tracked_ids.add(pos[k])
+        lc = pos.get("oco_list_client_order_id")
+        if lc:
+            tracked_ids.add(_client_order_id("DONALT", _sym, lc))
+            tracked_ids.add(_client_order_id("DONALS", _sym, f"{lc}|SL"))
     unknown_orders = []
     for o in open_orders:
         cid = o.get("clientOrderId")
         sym = o.get("symbol")
         if cid and cid in tracked_ids:
             continue
-        if sym in positions:
-            continue
-        unknown_orders.append(f"{sym}/{cid}")
+        unknown_orders.append(f"{sym}/{cid} ({o.get('side')}/{o.get('type')}/{o.get('status')})")
     if unknown_orders:
-        msg = (f"[SAFETY] {len(unknown_orders)} open order exchange TIDAK tercatat di state "
-               f"({'; '.join(unknown_orders[:5])}). Indikasi STATE LOSS atau order manual.")
+        msg = f"[SAFETY] {len(unknown_orders)} UNKNOWN OPEN ORDER: {unknown_orders[:5]}"
         if TRADING_MODE == "live":
-            raise RuntimeError(msg + " Bot dihentikan (fail-closed). Manual reconciliation sebelum restart.")
+            raise UnknownOrderError(msg + ". FAIL CLOSED: jangan cancel otomatis, reconciliation manual.")
         notify_error(msg + " [TESTNET: lanjut jalan, cek manual.]")
-    try:
-        bal = exchange.fetch_balance()
-        totals = bal.get("total") or {}
-        position_bases = {s.split("/")[0] for s in positions}
-        held_unknown = []
-        for code, amt in totals.items():
-            amt = float(amt or 0)
-            if amt <= 0 or code == QUOTE_ASSET or code in position_bases:
-                continue
-            try:
-                px = float(exchange.fetch_ticker(f"{code}/{QUOTE_ASSET}").get("last") or 0)
-            except Exception:
-                px = 0.0
-            if amt * px < 10.0:
-                continue
-            held_unknown.append(f"{code}:{amt:.6f}")
-        if held_unknown:
-            notify_error(f"[SAFETY] Aset non-{QUOTE_ASSET} >$10 tidak tercatat di state: "
-                         f"{'; '.join(held_unknown[:8])}. Indikasi STATE LOSS/order manual/dust besar. Cek manual.")
-    except Exception as e:
-        log.warning(f"verify_exchange_state: gagal cek holdings: {e}")
-
-
 
 def reconcile_pending_orders(state):
     """Recover ambiguous BUY/SELL intents after a process/VPS restart."""
@@ -2555,6 +2667,7 @@ def process_symbol(state, symbol, price_cache):
 # MAIN LOOP
 # =====================
 def run():
+    acquire_lock()  # P1.5: cegah double instance sebelum apa pun
     global exchange, RUNNING
     if TRADING_MODE not in ("off", "testnet", "live"):
         notify_error(f"TRADING_MODE='{TRADING_MODE}' tidak dikenal (harus off/testnet/live). Bot berhenti.")
@@ -2572,6 +2685,11 @@ def run():
         health_thread = threading.Thread(target=start_health_server, daemon=True)
         health_thread.start()
 
+    if TIMEFRAME != "1h":
+        if env_bool("STRICT_PINE_PARITY", False):
+            notify_error(f"STRICT_PINE_PARITY aktif: TIMEFRAME={TIMEFRAME} != 1h (Pine only1H=true). Bot berhenti.")
+            return
+        log.warning(f"TIMEFRAME={TIMEFRAME} != 1h: mode berbeda dari Pine original (only1H=true).")
     exchange = make_exchange()
 
     # --- LIVE SAFETY: withdrawal permission must be verified, never fail-open ---
@@ -2663,8 +2781,8 @@ def run():
 
             save_state(state)
             sleep_interruptible(LOOP_INTERVAL_SECONDS)
-        except StatePersistenceError as e:
-            notify_error(f"🛑 FATAL: State persistence gagal. Bot berhenti (fail-closed). {e}")
+        except (StatePersistenceError, BalanceFetchError) as e:
+            notify_error(f"🛑 FATAL: {type(e).__name__}: {e} Bot berhenti (fail-closed).")
             RUNNING = False
             break
         except Exception as e:
