@@ -861,13 +861,16 @@ def _normalize_binance_order(order):
 
 
 def _is_definitive_not_found(exc):
-    """True only when the exchange explicitly says the requested object is absent."""
+    """True only when the exchange explicitly says the requested object is absent.
+    Binance: -2011 (unknown order), -2013 (order does not exist) = absen PASTI.
+    -2018 (balance insufficient) TIDAK termasuk -> UNKNOWN, bukan bukti absen.
+    """
     if isinstance(exc, ccxt.OrderNotFound):
         return True
     text = str(exc).lower()
     info = getattr(exc, "args", None)
     blob = f"{text} {info}".lower()
-    return any(code in blob for code in ("-2011", "-2013", "-2018", "unknown order sent", "order does not exist", "order list does not exist", "order not found"))
+    return any(code in blob for code in ("-2011", "-2013", "unknown order sent", "order does not exist", "order list does not exist", "order not found"))
 
 
 def lookup_order_by_client_id(symbol, client_order_id):
