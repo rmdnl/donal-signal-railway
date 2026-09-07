@@ -741,7 +741,7 @@ def calculate_signal(symbol):
 
     if USE_ADX_FILTER:
         adx_val = float(row["adx"])
-        adx_ok = adx_val >= ADX_THRESHOLD
+        adx_ok = adx_val > ADX_THRESHOLD
 
 
     buy_signal = bool(bull_trend and buy_trigger and res_room_ok and volume_ok and adx_ok)
