@@ -446,7 +446,9 @@ def load_state():
                 ) from e
             state = _default_state()
     else:
-        _touch_state_file()
+        # First run: state file belum ada. save_state() di run()
+        # akan membuatnya dengan state default; cukup catat log.
+        log.info("State file belum ada (first run); pakai state baru.")
     return state
 
 
