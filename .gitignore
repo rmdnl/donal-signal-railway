@@ -25,3 +25,8 @@ performance_baseline.json
 trade_history.json
 state_signals.json
 *.corrupt.*
+
+# runtime & secret backups
+donal_bot.lock
+.env.save
+*.save
