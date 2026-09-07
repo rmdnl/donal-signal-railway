@@ -40,22 +40,17 @@ Padahal bot udah bilang **skip**. 🗿
 4. **Locked at Entry:** Nilai ATR & Pivot dikunci saat order dikirim → gak bergeser walau market berubah
 
 ### 🎯 Precision Entry (Match Pine `process_orders_on_close`)
-Pine Script eksekusi di harga close candle. Python bot punya 2 mode:
+Bot eksekusi MARKET order di candle close (match Pine `process_orders_on_close`).
 - **Market Order (Default):** Cepat, pasti fill, tapi ada slippage
-- **Limit Order Mode (`USE_LIMIT_ENTRY=true`):** Kirim limit di `close + 0.1%`, tunggu max 120 detik. Kalau gak fill → cancel & skip. **Lebih presisi, match spirit Pine Script.**
 
 ### 🛡️ Risk Management Lebih Strict dari Your Parents
-- **Risk-Based Sizing:** `Qty = (Equity × 1%) / (Entry - SL)` → rugi max 1% per trade
-- **Max Position Cap:** `MAX_POSITION_PCT=25.0` → gak pernah lebih dari 25% equity di satu trade (safety net vs Pine default 20%)
-- **Break-Even Protection:** Profit ≥1% → SL otomatis geser ke Entry + 0.15% (cover fee)
-- **Vol-Scaled SL/TP:** Multiplier SL/TP adjust berdasarkan volatilitas relatif (0.8x - 1.5x)
+- **Sizing**: 20% equity per posisi (match Pine `percent_of_equity=20`).
+- **SL/TP structure**: fixed 1.5x/2.5x ATR + pivot S/R lock (match Pine).
 - **Daily/Weekly Loss Limit:** Rugi 3%/hari atau 6%/minggu → entry baru diblokir (circuit breaker)
-- **Correlation Guard:** Max 1 posisi per grup (BTC/ETH/SOL/BNB satu geng) → anti overexposure
-- **Slippage Guard:** Entry dibatalkan kalau estimasi slippage > 0.2% (strict!)
 
 ### 📡 Dashboard Pro-Grade (Streamlit + Plotly)
 Akses via `http://your-vps-ip:8501`:
-- **Signal Strength Radar:** Scan semua symbol, kasih skor 0-100% berdasarkan 5 syarat Pine (TREND, PRICE, RSI, VOL, BO). Auto-ranking — yang paling siap entry di atas (🔥/⚡)
+- **Signal Strength Radar:** Scan semua symbol, kasih skor 0-100% berdasarkan 7 syarat Pine (4H TREND, PRICE, RSI, VOL, BO, ADX, RES-ROOM) pakai closed candle 1H. Auto-ranking — yang paling siap entry di atas (🔥/⚡)
 - **Next Signal Countdown:** Timer real-time kapan candle 1H berikutnya close (WIB)
 - **Unrealized P&L + %:** P&L posisi terbuka + persentase terhadap equity
 - **Realized P&L + %:** Akumulasi profit/loss + persentase terhadap cash
@@ -86,9 +81,8 @@ Akses via `http://your-vps-ip:8501`:
 | Commission | 0.1% per side | `TAKER_FEE_PCT=0.1` | ✅ |
 | EMA Smoothing | `ta.ema` = α=2/(n+1) | `ewm(span=n)` = α=2/(n+1) | ✅ |
 | RMA Smoothing | Wilder's RMA = α=1/n | `ewm(alpha=1/n)` | ✅ |
-| Process Orders | `process_orders_on_close=true` | `USE_LIMIT_ENTRY` mode available | ✅ |
-| Default Qty | `percent_of_equity, 20` | `MAX_POSITION_PCT=25.0` cap | ✅ |
-| Slippage | `slippage=2` ticks | `MAX_ENTRY_SLIPPAGE_PCT=0.2` | ✅ |
+| Default Qty | percent_of_equity=20 | percent_of_equity=20 (PCT_OF_EQUITY) | ✅ |
+| Slippage | slippage=2 | slippage real market order (dilaporkan, tidak membatalkan) | ✅ |
 
 **12/12 core logic points verified match.** Bot kamu adalah eksekusi live yang faithful dari backtest TradingView.
 
@@ -118,7 +112,6 @@ SYMBOLS=BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT
 TIMEFRAME=1h
 HTF_TIMEFRAME=4h
 TRADING_MODE=off
-MAX_POSITION_PCT=25.0
 DAILY_LOSS_LIMIT_PCT=3.0
 WEEKLY_LOSS_LIMIT_PCT=6.0
 TELEGRAM_ENABLED=true
@@ -132,13 +125,10 @@ TELEGRAM_CHAT_ID=chat_id_lo
 TRADING_MODE=testnet
 BINANCE_TESTNET_API_KEY=key_testnet_lo
 BINANCE_TESTNET_API_SECRET=secret_testnet_lo
-RISK_PCT_PER_TRADE=1.0
-MAX_ENTRY_SLIPPAGE_PCT=0.2
+| Slippage | slippage=2 | slippage real market order (dilaporkan, tidak membatalkan) | ✅ |
 USE_NATIVE_OCO_SLTP=true
 TAKER_FEE_PCT=0.1
-USE_LIMIT_ENTRY=false
-LIMIT_ENTRY_BUFFER_PCT=0.1
-LIMIT_ENTRY_TIMEOUT_SEC=120
+PCT_OF_EQUITY=20.0
 ```
 
 ### Tambahan Buat Live 🔴
@@ -159,18 +149,12 @@ BINANCE_LIVE_API_SECRET=secret_live_lo
 | `TIMEFRAME` / `HTF_TIMEFRAME` | `1h` / `4h` | TF entry / TF tren |
 | `TRADING_MODE` | `off` | off / testnet / live |
 | `SL_MULT` / `TP_MULT` | `1.5` / `2.5` | Pengali ATR untuk SL/TP |
+| PCT_OF_EQUITY|20.0|% equity per posisi (match Pine)|
 | `RSI_ENTRY` / `RSI_EXIT` | `50` / `45` | Batas RSI entry/exit |
 | `VOLUME_MULT` | `1.5` | Min volume ratio vs MA (match Pine) |
 | `USE_ADX_FILTER` | `true` | Skip kalau ADX < 20 |
 | `USE_RES_FILTER` | `true` | Skip kalau mepet resistance |
-| `MAX_CONCURRENT_POSITIONS` | `2` | Max posisi terbuka |
-| `MAX_POSITION_PCT` | `25.0` | Cap max % equity per trade |
-| `RISK_PCT_PER_TRADE` | `1.0` | Risiko per trade (% dari equity) |
-| `MAX_ENTRY_SLIPPAGE_PCT` | `0.2` | Batas slippage entry (strict!) |
-| `USE_LIMIT_ENTRY` | `false` | Pakai limit order instead of market |
 | `USE_NATIVE_OCO_SLTP` | `true` | OCO native (fallback polling di Testnet) |
-| `USE_BREAK_EVEN` | `true` | Geser SL ke modal kalau profit ≥1% |
-| `USE_VOL_SCALED_SLTP` | `true` | Adjust SL/TP multiplier based on volatility |
 | `TAKER_FEE_PCT` | `0.1` | Fee per sisi (%) |
 | `DAILY_LOSS_LIMIT_PCT` | `3.0` | Circuit breaker harian |
 | `WEEKLY_LOSS_LIMIT_PCT` | `6.0` | Circuit breaker mingguan |
@@ -184,14 +168,9 @@ BINANCE_LIVE_API_SECRET=secret_live_lo
 03. Mepet resistance (jarak < 1 ATR)
 04. Volume tipis (< 1.5x MA)
 05. ADX lemes (< 20)
-06. Slot posisi penuh (max concurrent reached)
-07. Satu geng korelasi udah ada yang open
 08. Sinyal basi (> 15 menit sejak candle close)
 09. Saldo 0 / sizing gak valid
-10. Slippage kejauhan (> 0.2%)
 11. Limit rugi kena (daily/weekly circuit breaker)
-12. Max position cap exceeded (> 25% equity)
-13. Limit order timeout (gak fill dalam 120 detik)
 
 Kalau bot skip, jangan baper. Dia lagi ngejaga dompet lu. 🗿
 

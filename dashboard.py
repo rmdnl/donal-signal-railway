@@ -48,6 +48,9 @@ STATE_FILE = Path(os.getenv("STATE_FILE", "state_signals.json"))
 HISTORY_FILE = Path(os.getenv("HISTORY_FILE", "trade_history.json"))
 TRADING_MODE = os.getenv("TRADING_MODE", "off").strip().lower()
 QUOTE_ASSET = os.getenv("QUOTE_ASSET", "USDT").upper()
+VOLUME_MULT = float(os.getenv("VOLUME_MULT", "1.5"))
+ADX_THRESHOLD = float(os.getenv("ADX_THRESHOLD", "20"))
+MIN_ROOM_ATR = float(os.getenv("MIN_ROOM_ATR", "1.0"))
 
 st.markdown(
     r"""
@@ -191,7 +194,7 @@ def calculate_signal_strength(symbol, ex):
         except Exception:
             htf_bull = df["ema20"].iloc[-1] > df["ema60"].iloc[-1]
         
-        row = df.iloc[-1]
+        row = df.iloc[-2]  # closed candle terakhir (match logika bot)
         score = 0
         total_checks = 7
         details = []
@@ -218,7 +221,7 @@ def calculate_signal_strength(symbol, ex):
             details.append("RSI\u274c")
         
         # 4. Volume > 1.5x MA
-        if row["v"] > row["vol_ma"] * 1.5:
+        if row["v"] > row["vol_ma"] * VOLUME_MULT:
             score += 1
             details.append("VOL\u2705")
         else:
@@ -232,7 +235,7 @@ def calculate_signal_strength(symbol, ex):
             details.append("BO\u274c")
         
         # 6. ADX > 20
-        if row["adx"] > 20:
+        if row["adx"] > ADX_THRESHOLD:
             score += 1
             details.append("ADX\u2705")
         else:
@@ -242,7 +245,7 @@ def calculate_signal_strength(symbol, ex):
         if last_pivot_high is None or last_pivot_high <= row["c"]:
             res_room_ok = True
         else:
-            res_room_ok = (last_pivot_high - row["c"]) > 1.0 * row["atr"]
+            res_room_ok = (last_pivot_high - row["c"]) > MIN_ROOM_ATR * row["atr"]
         if res_room_ok:
             score += 1
             details.append("RES\u2705")
@@ -569,7 +572,7 @@ if nav in {"OVERVIEW","MARKET"}:
         st.markdown('<div class="pane"><div class="pane-head"><span>MARKET WATCH</span><span>LIVE</span></div><table class="terminal-table"><thead><tr><th>PAIR</th><th>LAST</th><th>STATE</th></tr></thead><tbody>'+''.join(rows)+'</tbody></table></div>',unsafe_allow_html=True)
         
         # SIGNAL RADAR
-        st.markdown('<div class="section-title">// SIGNAL RADAR · SIAP ENTRY?</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">// SIGNAL RADAR · LAST CLOSED 1H</div>', unsafe_allow_html=True)
         # [FIX] Scan semua symbol dari env SYMBOLS, bukan cuma yang ada di state
         env_symbols = os.getenv("SYMBOLS", "BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT")
         all_symbols = [s.strip() for s in env_symbols.split(",") if s.strip()]
@@ -590,7 +593,7 @@ if nav in {"OVERVIEW","MARKET"}:
         st.markdown(radar_html, unsafe_allow_html=True)
 
         st.markdown('<div class="section-title">// RISK SNAPSHOT</div>',unsafe_allow_html=True)
-        st.markdown(f'<div class="pane"><table class="terminal-table"><tbody><tr><td>MODE</td><td>{mode_label}</td></tr><tr><td>POSITIONS</td><td>{len(open_rows)}</td></tr><tr><td>SIZE</td><td>{os.getenv("PCT_OF_EQUITY","20")}% equity (Pine)</td></tr><tr><td>DAILY LIMIT</td><td>{os.getenv("DAILY_LOSS_LIMIT_PCT","-")}%</td></tr></tbody></table></div>',unsafe_allow_html=True)
+        st.markdown(f'<div class="pane"><table class="terminal-table"><tbody><tr><td>MODE</td><td>{mode_label}</td></tr><tr><td>POSITIONS</td><td>{len(open_rows)}</td></tr><tr><td>SIZE</td><td>{os.getenv("PCT_OF_EQUITY","20")}% equity (Pine)</td></tr><tr><td>DAILY LIMIT</td><td>{os.getenv("DAILY_LOSS_LIMIT_PCT","-")}%</td></tr><tr><td>WEEKLY LIMIT</td><td>{os.getenv("WEEKLY_LOSS_LIMIT_PCT","-")}%</td></tr></tbody></table></div>',unsafe_allow_html=True)
     with center:
         selected=st.selectbox("Market", symbols or ["BTC/USDT","ETH/USDT","BNB/USDT","SOL/USDT"], label_visibility="collapsed", key="chart_symbol")
         st.markdown(f'<div class="section-title">// MARKET · {selected.replace("/","")} · 1H</div>',unsafe_allow_html=True)
