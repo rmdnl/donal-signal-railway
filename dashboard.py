@@ -192,7 +192,7 @@ def calculate_signal_strength(symbol, ex):
             else:
                 htf_bull = False
         except Exception:
-            htf_bull = df["ema20"].iloc[-1] > df["ema60"].iloc[-1]
+            htf_bull = False  # match bot: 4H gagal = skip (bukan fallback 1H proxy)
         
         row = df.iloc[-2]  # closed candle terakhir (match logika bot)
         score = 0
