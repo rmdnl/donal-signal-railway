@@ -20,3 +20,9 @@ trade_history.json
 *_pullback.json
 state_*.json
 history_*.json
+
+# Runtime / State files (jangan di-commit)
+performance_baseline.json
+trade_history.json
+state_signals.json
+*.corrupt.*
