@@ -11,7 +11,6 @@ __pycache__/
 state_signals*
 trade_history.json
 .DS_Store
-.*
 !.gitignore
 !.env.example
 
