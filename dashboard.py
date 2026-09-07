@@ -46,6 +46,7 @@ def get_next_candle_countdown(timeframe="1h"):
 
 STATE_FILE = Path(os.getenv("STATE_FILE", "state_signals.json"))
 HISTORY_FILE = Path(os.getenv("HISTORY_FILE", "trade_history.json"))
+BASELINE_FILE = Path(os.getenv("BASELINE_FILE", "performance_baseline.json"))
 TRADING_MODE = os.getenv("TRADING_MODE", "off").strip().lower()
 QUOTE_ASSET = os.getenv("QUOTE_ASSET", "USDT").upper()
 VOLUME_MULT = float(os.getenv("VOLUME_MULT", "1.5"))
@@ -545,7 +546,10 @@ for symbol, pos in positions.items():
 equity=balance+open_value
 unrealized_pct = (unrealized / equity * 100) if equity > 0 else 0.0
 realized=sum(float(t.get("pnl_net",t.get("pnl",0)) or 0) for t in history)
-realized_pct = (realized / balance * 100) if balance > 0 else 0.0  # [FIX #6] Hitung terhadap cash awal, bukan current equity
+_baseline = load_json(BASELINE_FILE, {})
+_start_equity = float(_baseline.get("start_equity") or 0.0)
+base_label = f"BASE {_start_equity:,.0f}" if _start_equity > 0 else "NO BASE YET"
+realized_pct = (realized / _start_equity * 100) if _start_equity > 0 else 0.0  # [FIX] return = realized / STARTING equity, bukan current balance
 wins=sum(1 for t in history if float(t.get("pnl_net",t.get("pnl",0)) or 0)>0)
 win_rate=wins/len(history)*100 if history else 0
 online,age=bot_status()
@@ -558,7 +562,7 @@ nav=st.radio("Terminal navigation", ["OVERVIEW","MARKET","POSITIONS","HISTORY","
 st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="section-title">// ACCOUNT OVERVIEW</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="metric-grid"><div class="metric"><div class="metric-label">Bot Equity</div><div class="metric-value amber">{equity:,.2f}</div><div class="metric-sub">{QUOTE_ASSET} · ESTIMATED</div></div><div class="metric"><div class="metric-label">Realized P&L</div><div class="metric-value {"pos" if realized>=0 else "neg"}">{realized:+,.2f}</div><div class="metric-sub"><span style="font-size:11px;color:{"var(--mint)" if realized>=0 else "var(--red)"}">{realized_pct:+.2f}%</span> · NET · {len(history)} CLOSED</div></div><div class="metric"><div class="metric-label">Unrealized P&L</div><div class="metric-value {"pos" if unrealized>=0 else "neg"}">{unrealized:+,.2f}</div><div class="metric-sub"><span style="font-size:11px;color:{"var(--mint)" if unrealized>=0 else "var(--red)"}">{unrealized_pct:+.2f}%</span> · {len(open_rows)} ACTIVE</div></div><div class="metric"><div class="metric-label">Win Rate</div><div class="metric-value cyan">{win_rate:.1f}%</div><div class="metric-sub">{wins} WINS / {len(history)} TRADES</div></div></div>', unsafe_allow_html=True)
+st.markdown(f'<div class="metric-grid"><div class="metric"><div class="metric-label">Bot Equity</div><div class="metric-value amber">{equity:,.2f}</div><div class="metric-sub">{QUOTE_ASSET} · ESTIMATED</div></div><div class="metric"><div class="metric-label">Realized P&L</div><div class="metric-value {"pos" if realized>=0 else "neg"}">{realized:+,.2f}</div><div class="metric-sub"><span style="font-size:11px;color:{"var(--mint)" if realized>=0 else "var(--red)"}">{realized_pct:+.2f}%</span> · NET · {len(history)} CLOSED · {base_label}</div></div><div class="metric"><div class="metric-label">Unrealized P&L</div><div class="metric-value {"pos" if unrealized>=0 else "neg"}">{unrealized:+,.2f}</div><div class="metric-sub"><span style="font-size:11px;color:{"var(--mint)" if unrealized>=0 else "var(--red)"}">{unrealized_pct:+.2f}%</span> · {len(open_rows)} ACTIVE</div></div><div class="metric"><div class="metric-label">Win Rate</div><div class="metric-value cyan">{win_rate:.1f}%</div><div class="metric-sub">{wins} WINS / {len(history)} TRADES</div></div></div>', unsafe_allow_html=True)
 
 if nav in {"OVERVIEW","MARKET"}:
     left,center,right=st.columns([1.0,2.45,1.0],gap="small")

@@ -53,7 +53,7 @@ Akses via `http://your-vps-ip:8501`:
 - **Signal Strength Radar:** Scan semua symbol, kasih skor 0-100% berdasarkan 7 syarat Pine (4H TREND, PRICE, RSI, VOL, BO, ADX, RES-ROOM) pakai closed candle 1H. Auto-ranking — yang paling siap entry di atas (🔥/⚡)
 - **Next Signal Countdown:** Timer real-time kapan candle 1H berikutnya close (WIB)
 - **Unrealized P&L + %:** P&L posisi terbuka + persentase terhadap equity
-- **Realized P&L + %:** Akumulasi profit/loss + persentase terhadap cash
+- **Realized P&L + %:** Akumulasi profit/loss + persentase terhadap STARTING EQUITY (baseline)
 - **Plotly Chart:** Candlestick + EMA20/60 + Garis Support/Resistance + Panah BUY/SELL marker + Background bull trend
 - **Watchlist Live:** Harga real-time semua symbol di `.env`
 

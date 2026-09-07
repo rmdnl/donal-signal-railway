@@ -212,6 +212,7 @@ def get_state_path():
 
 STATE_FILE = get_state_path()
 HISTORY_FILE = Path(os.getenv("HISTORY_FILE", "trade_history.json").strip() or "trade_history.json")
+BASELINE_FILE = Path(os.getenv("BASELINE_FILE", "performance_baseline.json").strip() or "performance_baseline.json")
 
 exchange = None
 VALID_SYMBOLS = []
@@ -513,6 +514,25 @@ def save_trade_history(symbol, pos, exit_price, reason, pnl_quote_gross=None, pn
 # =====================
 # INDICATORS
 # =====================
+def ensure_performance_baseline(state, last_trade_pnl_quote):
+    """Catat starting equity SEKALI saat closed trade pertama.
+    Return % = realized / STARTING equity (bukan current balance).
+    Reset manual: hapus performance_baseline.json."""
+    try:
+        if BASELINE_FILE.exists():
+            return
+        if TRADING_MODE == "off":
+            start_equity = float(os.getenv("VIRTUAL_BALANCE", "1000"))
+        else:
+            start_equity = max(get_total_equity(state, QUOTE_ASSET) - float(last_trade_pnl_quote or 0.0), 0.0)
+        tmp = BASELINE_FILE.with_suffix(BASELINE_FILE.suffix + ".tmp")
+        tmp.write_text(json.dumps({"start_equity": start_equity, "mode": TRADING_MODE, "created_ts": int(time.time() * 1000)}, indent=2), encoding="utf-8")
+        os.replace(tmp, BASELINE_FILE)
+        log.info(f"Performance baseline dicatat: starting equity = {start_equity:.2f} {QUOTE_ASSET}")
+    except Exception as e:
+        log.warning(f"Gagal catat performance baseline: {e}")
+
+
 def ema(series, length):
     return series.ewm(span=length, adjust=False).mean()
 
@@ -1923,6 +1943,7 @@ def record_partial_exit(state, symbol, pos_slice, exit_price, reason, slippage_p
         pnl_quote_gross=pnl_gross, pnl_quote_net=pnl_net, fees_quote=fees_quote,
     )
     record_realized_pnl(state, pnl_pct_net, pnl_quote=pnl_net)
+    ensure_performance_baseline(state, pnl_net)
     save_state(state)
 
 
@@ -1953,6 +1974,7 @@ def finalize_exit(state, symbol, reason, exit_price, exit_qty=None, slippage_pct
     
     positions.pop(symbol, None)
     record_realized_pnl(state, pnl_pct_net, pnl_quote=pnl_quote_net)
+    ensure_performance_baseline(state, pnl_quote_net)
     
     # --- PATCH KEAMANAN: Simpan state segera setelah exit ---
     save_state(state)
@@ -2127,6 +2149,7 @@ def send_exit_alert(state, symbol, reason, price=None):
     
     positions.pop(symbol, None)
     record_realized_pnl(state, pnl_pct_net)  # tidak ada qty riil di signal-only, cuma %
+    ensure_performance_baseline(state, None)
 
     # Emoji reflects NET result -- a "win" that doesn't clear round-trip fees
     # isn't actually a win.
