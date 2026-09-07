@@ -514,8 +514,8 @@ def save_trade_history(symbol, pos, exit_price, reason, pnl_quote_gross=None, pn
 # =====================
 # INDICATORS
 # =====================
-def ensure_performance_baseline(state, last_trade_pnl_quote):
-    """Catat starting equity SEKALI saat closed trade pertama.
+def ensure_performance_baseline(state):
+    """Catat starting equity SEKALI saat initialization (bot start).
     Return % = realized / STARTING equity (bukan current balance).
     Reset manual: hapus performance_baseline.json."""
     try:
@@ -524,7 +524,10 @@ def ensure_performance_baseline(state, last_trade_pnl_quote):
         if TRADING_MODE == "off":
             start_equity = float(os.getenv("VIRTUAL_BALANCE", "1000"))
         else:
-            start_equity = max(get_total_equity(state, QUOTE_ASSET) - float(last_trade_pnl_quote or 0.0), 0.0)
+            start_equity = get_total_equity(state, QUOTE_ASSET)
+        if start_equity <= 0:
+            log.warning("Starting equity tidak valid; baseline dicoba lagi di restart berikutnya.")
+            return
         tmp = BASELINE_FILE.with_suffix(BASELINE_FILE.suffix + ".tmp")
         tmp.write_text(json.dumps({"start_equity": start_equity, "mode": TRADING_MODE, "created_ts": int(time.time() * 1000)}, indent=2), encoding="utf-8")
         os.replace(tmp, BASELINE_FILE)
@@ -1943,7 +1946,6 @@ def record_partial_exit(state, symbol, pos_slice, exit_price, reason, slippage_p
         pnl_quote_gross=pnl_gross, pnl_quote_net=pnl_net, fees_quote=fees_quote,
     )
     record_realized_pnl(state, pnl_pct_net, pnl_quote=pnl_net)
-    ensure_performance_baseline(state, pnl_net)
     save_state(state)
 
 
@@ -1974,7 +1976,6 @@ def finalize_exit(state, symbol, reason, exit_price, exit_qty=None, slippage_pct
     
     positions.pop(symbol, None)
     record_realized_pnl(state, pnl_pct_net, pnl_quote=pnl_quote_net)
-    ensure_performance_baseline(state, pnl_quote_net)
     
     # --- PATCH KEAMANAN: Simpan state segera setelah exit ---
     save_state(state)
@@ -2149,7 +2150,6 @@ def send_exit_alert(state, symbol, reason, price=None):
     
     positions.pop(symbol, None)
     record_realized_pnl(state, pnl_pct_net)  # tidak ada qty riil di signal-only, cuma %
-    ensure_performance_baseline(state, None)
 
     # Emoji reflects NET result -- a "win" that doesn't clear round-trip fees
     # isn't actually a win.
@@ -2598,6 +2598,7 @@ def run():
 
     reconcile_pending_orders(state)
     save_state(state)
+    ensure_performance_baseline(state)
 
     if TRADING_MODE == "off":
         mode_line = "Mode: SIGNAL ONLY (tanpa auto order)"
