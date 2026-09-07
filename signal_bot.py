@@ -2267,7 +2267,11 @@ def verify_exchange_state(state):
     if TRADING_MODE not in ("live", "testnet"):
         return
     try:
-        open_orders = exchange.fetch_open_orders()
+        open_orders = []
+        for sym in VALID_SYMBOLS:
+            sym_orders = exchange.fetch_open_orders(sym)
+            if sym_orders:
+                open_orders.extend(sym_orders)
     except Exception as e:
         if TRADING_MODE == "live":
             raise RuntimeError(f"[SAFETY] Gagal verifikasi open orders exchange: {e}. Bot berhenti (fail-closed).")
