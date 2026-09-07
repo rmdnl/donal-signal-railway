@@ -460,6 +460,11 @@ def save_state(state):
         tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, STATE_FILE)
     except Exception as e:
+        if TRADING_MODE in ("live", "testnet"):
+            raise StatePersistenceError(
+                f"[FATAL] save_state gagal: {e}. "
+                f"Bot dihentikan (fail-closed): idempotency bergantung pada state persistence."
+            ) from e
         log.error(f"Gagal save state: {e}")
 
 
@@ -1485,6 +1490,13 @@ def _extract_oco_child_ids(symbol, oco_response, intent=None):
 
 
 class OcoPreflightError(RuntimeError):
+    pass
+
+
+class StatePersistenceError(RuntimeError):
+    """save_state gagal di live/testnet. Seluruh idempotency system
+    bergantung pada state persistence -- trading tanpa state yang
+    ter-persist = trading buta. Bot HARUS berhenti."""
     pass
 
 
@@ -2641,6 +2653,8 @@ def run():
             for symbol in VALID_SYMBOLS:
                 try:
                     process_symbol(state, symbol, price_cache)
+                except StatePersistenceError:
+                    raise  # FATAL: jangan telan, propagate ke shutdown
                 except ccxt.NetworkError as e:
                     log.warning(f"{symbol} network error: {e}")
                 except ccxt.ExchangeError as e:
@@ -2650,11 +2664,18 @@ def run():
 
             save_state(state)
             sleep_interruptible(LOOP_INTERVAL_SECONDS)
+        except StatePersistenceError as e:
+            notify_error(f"🛑 FATAL: State persistence gagal. Bot berhenti (fail-closed). {e}")
+            RUNNING = False
+            break
         except Exception as e:
             notify_error_throttled("main_loop_error", f"Main loop error: {e}")
             sleep_interruptible(30)
 
-    save_state(state)
+    try:
+        save_state(state)
+    except StatePersistenceError:
+        pass  # Disk udah diketahui rusak, jangan crash di shutdown
     notify_event("🛑 DONAL Signal Bot berhenti/shutdown.")
 
 
