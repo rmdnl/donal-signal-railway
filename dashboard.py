@@ -168,7 +168,6 @@ def calculate_signal_strength(symbol, ex):
         
         # Pivot High (resistance) for ResRoom
         highs = df["h"].values
-        lows = df["l"].values
         n = len(df)
         last_pivot_high = None
         for i in range(n - 1 - 10, 10 - 1, -1):

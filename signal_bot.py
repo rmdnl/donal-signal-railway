@@ -578,7 +578,6 @@ def adx(df, length=14):
     """ADX dihitung pakai fungsi atr() yang udah ada biar efisien."""
     high = df["high"]
     low = df["low"]
-    close = df["close"]
     
     up_move = high - high.shift(1)
     down_move = low.shift(1) - low
@@ -718,7 +717,6 @@ def calculate_signal(symbol):
 
     row = df1h.iloc[-1]
 
-    tf_ms = exchange.parse_timeframe(TIMEFRAME) * 1000
 
     required = [
         row["ema20"], row["rsi14"], row["hh20_prev"], row["atr14"],
@@ -2545,7 +2543,7 @@ def process_symbol(state, symbol, price_cache):
 # MAIN LOOP
 # =====================
 def run():
-    global exchange, VALID_SYMBOLS
+    global exchange
 
     if TRADING_MODE not in ("off", "testnet", "live"):
         notify_error(f"TRADING_MODE='{TRADING_MODE}' tidak dikenal (harus off/testnet/live). Bot berhenti.")
@@ -2610,7 +2608,7 @@ def run():
         mode_line = "Mode: 🔴🔴🔴 AUTO TRADING -- LIVE (UANG BENERAN) 🔴🔴🔴"
 
     startup_lines = [
-        f"🤖 DONAL Signal Bot started",
+        "🤖 DONAL Signal Bot started",
         mode_line,
         f"Symbols: {', '.join(VALID_SYMBOLS)}",
         f"TF: {TIMEFRAME}",
@@ -2627,8 +2625,8 @@ def run():
     if TRADING_MODE != "off":
         startup_lines += [
         f"Position size: {PCT_OF_EQUITY}% of equity (match Pine)",
-        f"Entry: MARKET (match Pine slippage=2)",
-            f"Exit: MARKET (SL/TP/trend exit)",
+        "Entry: MARKET (match Pine slippage=2)",
+            "Exit: MARKET (SL/TP/trend exit)",
             f"Native OCO SL/TP: {USE_NATIVE_OCO_SLTP} (UNKNOWN = no blind retry)",
         ]
 
