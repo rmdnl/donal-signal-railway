@@ -422,30 +422,30 @@ def load_state():
     state = _default_state()
     if STATE_FILE.exists():
         try:
-            state = _normalize_state(json.loads(STATE_FILE.read_text(encoding="utf-8")))
+            raw = STATE_FILE.read_text(encoding="utf-8")
+            if not raw.strip():
+                # File kosong (first-run / belum pernah save): bukan corrupt.
+                log.warning("State file kosong; pakai state baru (first run).")
+            else:
+                state = _normalize_state(json.loads(raw))
         except Exception as e:
             backup = STATE_FILE.with_name(f"{STATE_FILE.name}.corrupt.{int(time.time())}")
+            backup_note = ""
             try:
                 STATE_FILE.replace(backup)
-                log.error(f"State file invalid/corrupt: {e}. File dipindahkan ke {backup.name}; memakai state baru.")
+                backup_note = f"File corrupt dipindahkan ke {backup.name}."
             except Exception as move_error:
-                log.error(f"State file invalid/corrupt: {e}. Gagal backup state: {move_error}")
+                backup_note = f"Gagal backup state: {move_error}"
+            log.error(f"State file invalid/corrupt: {e}. {backup_note}")
+            if TRADING_MODE == "live":
+                raise RuntimeError(
+                    f"[SAFETY] STATE CORRUPT DI MODE LIVE! {backup_note} "
+                    f"Bot dihentikan (fail-closed) supaya tidak trading buta tanpa proteksi. "
+                    f"Manual reconciliation dulu sebelum restart."
+                ) from e
             state = _default_state()
-
-    state.setdefault("last_bar_ts", {})
-    state.setdefault("virtual_positions", {})
-    state.setdefault("last_buy_alert_bar", {})
-    state.setdefault("last_exit_alert_bar", {})
-    state.setdefault("entry_intents", {})
-    state.setdefault("oco_intents", {})
-    state.setdefault("exit_intents", {})
-    state.setdefault("risk_tracking", {})
-
-    for symbol in VALID_SYMBOLS:
-        state["last_bar_ts"].setdefault(symbol, 0)
-        state["last_buy_alert_bar"].setdefault(symbol, 0)
-        state["last_exit_alert_bar"].setdefault(symbol, 0)
-
+    else:
+        _touch_state_file()
     return state
 
 
@@ -2260,6 +2260,65 @@ def check_loss_limits_and_maybe_halt(state):
 # =====================
 # RESTART RECOVERY
 # =====================
+def verify_exchange_state(state):
+    """[SAFETY] Cross-check realita exchange vs state lokal.
+    Live: open order asing -> RuntimeError (fail-closed).
+    Testnet: warning saja. Aset asing > $10: warning (dust diabaikan)."""
+    if TRADING_MODE not in ("live", "testnet"):
+        return
+    try:
+        open_orders = exchange.fetch_open_orders()
+    except Exception as e:
+        if TRADING_MODE == "live":
+            raise RuntimeError(f"[SAFETY] Gagal verifikasi open orders exchange: {e}. Bot berhenti (fail-closed).")
+        log.warning(f"verify_exchange_state: gagal fetch open orders: {e}")
+        return
+    tracked_ids = set()
+    for key in ("entry_intents", "exit_intents", "oco_intents"):
+        for _sym, it in (state.get(key) or {}).items():
+            cid = it.get("client_order_id")
+            if cid:
+                tracked_ids.add(cid)
+    positions = state.get("virtual_positions") or {}
+    unknown_orders = []
+    for o in open_orders:
+        cid = o.get("clientOrderId")
+        sym = o.get("symbol")
+        if cid and cid in tracked_ids:
+            continue
+        if sym in positions:
+            continue
+        unknown_orders.append(f"{sym}/{cid}")
+    if unknown_orders:
+        msg = (f"[SAFETY] {len(unknown_orders)} open order exchange TIDAK tercatat di state "
+               f"({'; '.join(unknown_orders[:5])}). Indikasi STATE LOSS atau order manual.")
+        if TRADING_MODE == "live":
+            raise RuntimeError(msg + " Bot dihentikan (fail-closed). Manual reconciliation sebelum restart.")
+        notify_error(msg + " [TESTNET: lanjut jalan, cek manual.]")
+    try:
+        bal = exchange.fetch_balance()
+        totals = bal.get("total") or {}
+        position_bases = {s.split("/")[0] for s in positions}
+        held_unknown = []
+        for code, amt in totals.items():
+            amt = float(amt or 0)
+            if amt <= 0 or code == QUOTE_ASSET or code in position_bases:
+                continue
+            try:
+                px = float(exchange.fetch_ticker(f"{code}/{QUOTE_ASSET}").get("last") or 0)
+            except Exception:
+                px = 0.0
+            if amt * px < 10.0:
+                continue
+            held_unknown.append(f"{code}:{amt:.6f}")
+        if held_unknown:
+            notify_error(f"[SAFETY] Aset non-{QUOTE_ASSET} >$10 tidak tercatat di state: "
+                         f"{'; '.join(held_unknown[:8])}. Indikasi STATE LOSS/order manual/dust besar. Cek manual.")
+    except Exception as e:
+        log.warning(f"verify_exchange_state: gagal cek holdings: {e}")
+
+
+
 def reconcile_pending_orders(state):
     """Recover ambiguous BUY/SELL intents after a process/VPS restart."""
     if TRADING_MODE == "off":
@@ -2505,6 +2564,7 @@ def run():
         return
 
     state = load_state()
+    verify_exchange_state(state)
 
     reconcile_pending_orders(state)
     save_state(state)
