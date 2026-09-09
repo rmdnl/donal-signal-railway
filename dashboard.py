@@ -579,7 +579,7 @@ if nav in {"OVERVIEW","MARKET"}:
         st.markdown('<div class="pane"><div class="pane-head"><span>MARKET WATCH</span><span>LIVE</span></div><table class="terminal-table"><thead><tr><th>PAIR</th><th>LAST</th><th>STATE</th></tr></thead><tbody>'+''.join(rows)+'</tbody></table></div>',unsafe_allow_html=True)
         
         # SIGNAL RADAR
-        st.markdown('<div class="section-title">// SIGNAL RADAR · LAST CLOSED {TIMEFRAME.upper()}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-title">// SIGNAL RADAR · LAST CLOSED {TIMEFRAME.upper()}</div>', unsafe_allow_html=True)
         # [FIX] Scan semua symbol dari env SYMBOLS, bukan cuma yang ada di state
         env_symbols = os.getenv("SYMBOLS", "BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT")
         all_symbols = [s.strip() for s in env_symbols.split(",") if s.strip()]

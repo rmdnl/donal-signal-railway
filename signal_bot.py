@@ -2723,10 +2723,10 @@ def run():
         return
 
     state = load_state()
-    verify_exchange_state(state)
-
     reconcile_pending_orders(state)
     save_state(state)
+
+    verify_exchange_state(state)
     ensure_performance_baseline(state)
 
     if TRADING_MODE == "off":
