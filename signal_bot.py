@@ -468,7 +468,7 @@ def load_state():
                 backup_note = f"Gagal backup state: {move_error}"
             log.error(f"State file invalid/corrupt: {e}. {backup_note}")
             if TRADING_MODE == "live":
-                raise RuntimeError(
+                raise StateCorruptError(
                     f"[SAFETY] STATE CORRUPT DI MODE LIVE! {backup_note} "
                     f"Bot dihentikan (fail-closed) supaya tidak trading buta tanpa proteksi. "
                     f"Manual reconciliation dulu sebelum restart."
